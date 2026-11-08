@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "painel",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["src/painel.py", "--porta", "8771"],
+      "port": 8771
+    }
+  ]
+}

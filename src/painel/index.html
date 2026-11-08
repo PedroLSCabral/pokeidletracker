@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PokeIdle Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topo">
+  <div class="logo"><span class="ico" data-ico="gema"></span><span>POKEIDLE<br><small>TRACKER</small></span></div>
+  <nav class="abas" role="tablist">
+    <button class="aba ativa" data-aba="mercado" role="tab">Mercado</button>
+    <button class="aba" data-aba="sinais" role="tab">Sinais</button>
+    <button class="aba" data-aba="montagem" role="tab">Montagem</button>
+    <button class="aba" data-aba="pokemon" role="tab">Pokémon</button>
+  </nav>
+  <div class="moeda-toggle" role="group" aria-label="Moeda">
+    <button class="btn-moeda ativa" data-moeda="gems"><span class="ico" data-ico="gema"></span>Gemas</button>
+    <button class="btn-moeda" data-moeda="coins"><span class="ico" data-ico="moeda"></span>Coins</button>
+  </div>
+  <button class="som" id="som" title="Aviso sonoro quando o robô disparar um alerta">♪ <span id="som-txt">som</span></button>
+  <button class="status" id="status" title="Status do coletor"><span class="led"></span><span id="status-txt">…</span></button>
+</header>
+<div class="status-pop janela hidden" id="status-pop">
+  <div class="janela-titulo">Coletor</div>
+  <div class="janela-corpo" id="status-corpo"></div>
+</div>
+
+<main>
+  <!-- MERCADO -->
+  <section id="aba-mercado" class="aba-corpo">
+    <aside class="janela cat-janela">
+      <div class="janela-corpo menu-lateral">
+        <div class="menu-titulo">Tipo</div>
+        <div class="menu-grupo">
+          <button class="menu-item" data-tipo="pokemon"><span class="ico" data-ico="pokedex"></span>Pokémon</button>
+          <button class="menu-item ativa" data-tipo="itens"><span class="ico" data-ico="bolsa"></span>Itens</button>
+        </div>
+        <div class="menu-titulo">Categoria</div>
+        <div class="menu-grupo" id="categorias"></div>
+      </div>
+    </aside>
+    <aside class="janela lista-janela">
+      <div class="janela-titulo">Itens <span class="sub" id="lista-sub"></span></div>
+      <div class="janela-corpo">
+        <input id="busca" class="campo" type="search" placeholder="buscar item…" autocomplete="off">
+        <div class="ordem">
+          <span>ordenar:</span>
+          <button class="chip ativa" data-ordem="vendas">volume</button>
+          <button class="chip" data-ordem="var">variação</button>
+          <button class="chip" data-ordem="preco">preço</button>
+          <button class="chip" data-ordem="nome">nome</button>
+        </div>
+        <div id="lista" class="lista"></div>
+      </div>
+    </aside>
+
+    <section class="janela detalhe-janela">
+      <div class="janela-titulo"><span class="ico ico-grande" id="det-ico"></span><span id="det-nome">Escolha um item</span>
+        <div class="janelas-tempo" role="group" aria-label="Janela de tempo">
+          <button class="chip" data-janela="24h">24h</button>
+          <button class="chip ativa" data-janela="7d">7d</button>
+          <button class="chip" data-janela="30d">30d</button>
+          <button class="chip" data-janela="tudo">tudo</button>
+        </div>
+      </div>
+      <div class="janela-corpo" id="detalhe">
+        <div class="vazio">Clique num item da lista para ver o gráfico.</div>
+      </div>
+    </section>
+  </section>
+
+  <!-- SINAIS (Fase 3) -->
+  <section id="aba-sinais" class="aba-corpo hidden">
+    <div class="sinais-grid">
+     <div class="coluna">
+      <div class="janela">
+        <div class="janela-titulo">Oportunidades de revenda <span class="sub" id="op-sub"></span></div>
+        <div class="janela-corpo">
+          <p class="explica">Comprar no <b>menor anúncio</b> agora e revender pela <b>referência</b> (a menor entre as medianas de 24h e 7d), pagando a taxa de 15%. Margem positiva = sobra dinheiro.</p>
+          <div class="filtros">
+            <label class="check"><input type="checkbox" id="op-todas"> mostrar também as margens negativas</label>
+            <label class="check"><input type="checkbox" id="op-liquidez" checked> esconder liquidez baixa</label>
+          </div>
+          <div class="tabela-wrap" style="max-height:none"><table class="tabela" id="op-tabela"></table></div>
+          <p class="aviso">Limites: a vitrine é lida a cada 15 min e o anúncio mais barato pode já ter sido comprado; só sabemos o <i>menor</i> preço, não quantas unidades há nele; revender pela mediana pode levar tempo se houver muitos anúncios.</p>
+        </div>
+      </div>
+      <div class="janela">
+        <div class="janela-titulo">Regras de alerta</div>
+        <div class="janela-corpo">
+          <div class="canais" id="canais"></div>
+          <table class="tabela" id="regras-tabela"></table>
+          <form class="nova-regra" id="form-regra">
+            <select id="r-tipo" class="campo"></select>
+            <select id="r-item" class="campo"></select>
+            <select id="r-moeda" class="campo"><option value="gems">gemas</option><option value="coins">coins</option></select>
+            <input id="r-valor" class="campo" type="number" step="any" required placeholder="valor">
+            <button class="btn-primario" type="submit">Adicionar</button>
+          </form>
+          <p class="aviso">O robô confere as regras depois de cada coleta (a cada 15 min). O mesmo alerta só se repete depois de 6 h, a não ser que fique 5% melhor.</p>
+          <button class="chip" id="btn-testar">enviar notificação de teste</button> <span id="teste-res" class="aviso"></span>
+        </div>
+      </div>
+      <div class="janela">
+        <div class="janela-titulo">Últimos alertas</div>
+        <div class="janela-corpo"><div class="tabela-wrap"><table class="tabela" id="log-tabela"></table></div></div>
+      </div>
+     </div>
+     <div class="coluna">
+      <div class="janela">
+        <div class="janela-titulo">Barato ou caro agora</div>
+        <div class="janela-corpo">
+          <p class="explica">Mediana das últimas 24h comparada à de 7 dias. ▼ = mais barato que o normal, ▲ = mais caro. Liquidez = vendas por dia.</p>
+          <div class="tabela-wrap" style="max-height:none"><table class="tabela" id="bc-tabela"></table></div>
+        </div>
+      </div>
+     </div>
+    </div>
+  </section>
+
+  <!-- MONTAGEM -->
+  <section id="aba-montagem" class="aba-corpo hidden">
+    <div class="janela barra-fonte">
+      <div class="janela-corpo">
+        <span>Preço de cada raridade:</span>
+        <button class="chip ativa" data-fonte="auto">automático</button>
+        <button class="chip" data-fonte="jogo">média 7d do jogo</button>
+        <button class="chip" data-fonte="anuncio">menor anúncio</button>
+        <span class="dica">automático = mediana das nossas vendas de 7 dias (com 3+ vendas) → média do jogo → menor anúncio</span>
+      </div>
+    </div>
+    <div class="montagens" id="montagens"></div>
+  </section>
+
+  <!-- POKÉMON -->
+  <section id="aba-pokemon" class="aba-corpo hidden">
+    <div class="pk-sub" role="tablist">
+      <button class="chip ativa" data-pksub="buscar">Encontrar Pokémon</button>
+      <button class="chip" data-pksub="padroes">Padrões do mercado</button>
+      <button class="chip" data-pksub="vendas">Vendas recentes</button>
+    </div>
+
+    <div class="janela pk-painel" id="pk-buscar">
+      <div class="janela-titulo">Encontrar o Pokémon ideal <span class="sub" id="pkb-sub"></span></div>
+      <div class="janela-corpo">
+        <form class="pk-form" id="pkb-form">
+          <label>Quero pagar até <input id="pkb-orc" class="campo" type="number" min="1" step="any" required placeholder="ex.: 300"></label>
+          <label>Moeda <select id="pkb-moeda" class="campo"><option value="gems">gemas</option><option value="coins">coins</option></select></label>
+          <label class="larga">Objetivo <select id="pkb-obj" class="campo"></select></label>
+          <label>Espécie <input id="pkb-esp" class="campo" type="search" placeholder="qualquer"></label>
+          <label>Tipo <select id="pkb-tipo" class="campo"></select></label>
+          <label>Potência mín. <select id="pkb-pmin" class="campo"><option value="">qualquer</option><option>2</option><option>3</option><option>4</option><option value="5">5 (P5)</option></select></label>
+          <label>Nível mín. <input id="pkb-nivel" class="campo" type="number" min="1" placeholder="qualquer"></label>
+          <label>Nota mín. <input id="pkb-nota" class="campo" type="number" min="3" max="5" step="0.01" placeholder="qualquer"></label>
+          <label class="check"><input type="checkbox" id="pkb-shiny"> só shiny</label>
+          <button class="btn-primario" type="submit">Procurar</button>
+        </form>
+        <p class="explica" id="pkb-explica">O <b>preço justo</b> de cada anúncio vem das vendas parecidas dos últimos 14 dias (mesma espécie, mesmo shiny, potência/nota/IV/qualidade/nível mais próximos). <b>Desconto</b> = quanto o anúncio está abaixo disso.</p>
+        <div class="tabela-wrap" style="max-height:640px"><table class="tabela" id="pkb-tabela"></table></div>
+        <p class="aviso">A loja é lida a cada 3 h: um anúncio da lista pode já ter sido vendido. Para comprar, procure a espécie no Mercado do jogo e confira o vendedor e o preço. Revenda líquida = preço justo − taxa progressiva do jogo (− diária de 100 mil coins, se em coins).</p>
+      </div>
+    </div>
+
+    <div class="pk-painel hidden" id="pk-padroes">
+      <div class="janela">
+        <div class="janela-titulo">Padrões do mercado de Pokémon <span class="sub" id="pkp-sub"></span></div>
+        <div class="janela-corpo">
+          <div class="filtros">
+            <span class="explica" style="margin:0">Janela:</span>
+            <button class="chip" data-pkdias="1">24h</button><button class="chip ativa" data-pkdias="7">7d</button><button class="chip" data-pkdias="30">30d</button>
+          </div>
+          <div class="tiles" id="pkp-tiles"></div>
+        </div>
+      </div>
+      <div class="pk-grid">
+        <div class="janela">
+          <div class="janela-titulo">Quanto cada atributo multiplica o preço</div>
+          <div class="janela-corpo">
+            <p class="explica"><b>1,0×</b> = preço normal da espécie; <b>3,0×</b> = três vezes mais caro. Nível, nota e potência mostram o <b>efeito isolado</b> de cada um (modelo de preço, com os outros atributos iguais). IV, qualidade e shiny comparam com a mediana da mesma espécie. Assim "P5 é caro" não se confunde com "espécie cara".</p>
+            <div id="pkp-premios"></div>
+          </div>
+        </div>
+        <div class="janela">
+          <div class="janela-titulo">Espécies mais negociadas</div>
+          <div class="janela-corpo">
+            <p class="explica">Dias de estoque = anúncios na loja ÷ vendas por dia. Muito estoque = difícil vender caro.</p>
+            <div class="tabela-wrap" style="max-height:520px"><table class="tabela" id="pkp-especies"></table></div>
+          </div>
+        </div>
+        <div class="janela">
+          <div class="janela-titulo">Vendas por hora do dia</div>
+          <div class="janela-corpo"><div class="grafico" id="pkp-horas"></div><p class="aviso">Horário de Brasília. Fica confiável com alguns dias de coleta.</p></div>
+        </div>
+        <div class="janela">
+          <div class="janela-titulo">Quem compra e quem vende em volume</div>
+          <div class="janela-corpo"><div class="duas-col" style="margin:0"><table class="tabela" id="pkp-compradores"></table><table class="tabela" id="pkp-vendedores"></table></div>
+            <p class="aviso" id="pkp-piso"></p></div>
+        </div>
+        <div class="janela">
+          <div class="janela-titulo">Taxa para vender Pokémon</div>
+          <div class="janela-corpo"><table class="tabela" id="pkp-taxa"></table>
+            <p class="aviso">Em gemas a taxa é progressiva por faixa: 13% até 500, 10% de 501 a 5.000, 7,5% acima. Em coins, 15%. Anunciar custa 100 mil coins por dia, mesmo se vender antes.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="janela pk-painel hidden" id="pk-vendas">
+      <div class="janela-titulo">Vendas de Pokémon</div>
+      <div class="janela-corpo">
+        <div class="filtros">
+          <input id="pk-busca" class="campo" type="search" placeholder="espécie…">
+          <select id="pk-moeda" class="campo"><option value="">todas as moedas</option><option value="gems">gemas</option><option value="coins">coins</option></select>
+          <label class="check"><input type="checkbox" id="pk-shiny"> só shiny</label>
+        </div>
+        <div class="tabela-wrap"><table class="tabela" id="pk-tabela"></table></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="tooltip hidden" id="tooltip" role="tooltip"></div>
+<div class="avisos" id="avisos" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

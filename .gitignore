@@ -1,0 +1,11 @@
+# token da conta coletora: nunca versionar nem compartilhar
+config.local.json
+config.local.tmp
+
+# banco, logs e estado do robô
+data/
+
+__pycache__/
+*.pyc
+.venv/
+.claude/settings.local.json
