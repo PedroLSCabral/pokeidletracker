@@ -209,8 +209,6 @@ def main() -> None:
     # pythonw não tem console: erros da própria bandeja vão para um arquivo.
     sys.stdout = sys.stderr = _abrir_log("bandeja.log")
 
-    import pystray
-
     robo = Filho("Robô", "robo.py", None, "robo.erros.log",
                  "veja o motivo em data\\robo.log (se a sessão foi recusada, rode "
                  "python src\\robo.py --configurar).")
@@ -219,6 +217,23 @@ def main() -> None:
     filhos = (robo, painel)
     for f in filhos:
         f.ligar()
+
+    try:
+        import pystray
+    except ImportError as e:
+        # Sem a biblioteca do ícone, robô e painel rodam mesmo assim (vigiados, sem ícone) e um aviso explica.
+        print(time.strftime("[%Y-%m-%d %H:%M:%S]"), f"sem ícone na bandeja: {e}", flush=True)
+        threading.Thread(target=lambda: ctypes.windll.user32.MessageBoxW(
+            None, "O robô e o painel estão rodando, mas sem o ícone na bandeja: falta a biblioteca "
+                  f"do ícone ({e.name}).\n\nPara corrigir, abra um terminal na pasta do projeto e rode:\n"
+                  "pip install -r requirements.txt\n\nDepois reinicie o PC ou rode o iniciar.bat.",
+            "PokeIdle Tracker", 0x40), daemon=True).start()
+        while True:
+            time.sleep(5)
+            for f in filhos:
+                aviso = f.vigiar()
+                if aviso:
+                    print(time.strftime("[%Y-%m-%d %H:%M:%S]"), aviso, flush=True)
 
     def status_texto(_=None) -> str:
         return f"Robô: {robo.estado} (último registro {ultimo_registro_robo()})"
