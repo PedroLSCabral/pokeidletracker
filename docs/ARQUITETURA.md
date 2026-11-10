@@ -372,8 +372,15 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
 - **`Comparaveis`** dá o preço justo de um Pokémon.
   - Com 5 ou mais vendas parecidas (mesma espécie, shiny, moeda, faixa de nível e de nota), usa a mediana delas.
   - Senão, usa o modelo de multiplicadores em log: base da espécie × nível × nota × potência, ajustado por backfitting.
+  - Uma espécie cujas vendas saem todas como fora da curva no 2º ajuste fica sem preço base: `preco_justo` confere `(especie, shiny) in base` antes de usar o modelo.
 - **`taxa_venda`** calcula a comissão progressiva do jogo para Pokémon.
-- **`buscar(...)`** procura na loja (`pk_anuncios`) os anúncios ativos dentro do orçamento e ordena pelo objetivo (`OBJETIVOS`): equilibrado, forte, barganha, custo, nota ou pvp. O objetivo `pvp` usa `pesos_pvp` por `species_id`.
+- **`indice_caca(nivel, stats)`** é o dano de um golpe na caça, pela fórmula de dano do jogo: `(2·nível/5 + 2) × máx(ATK, SP.ATK) / 100`. Ficam de fora o poder do golpe, a DEF do alvo e o STAB, que valem igual para todos. Os stats do anúncio já vêm no nível dele.
+- **`buscar(...)`** procura na loja (`pk_anuncios`) os anúncios ativos dentro do orçamento e ordena pelo objetivo (`OBJETIVOS`):
+  - `caca` ordena pelo índice de caça; `custo`, pelo índice de caça por gema ou coin;
+  - `equilibrado` pesa 60% o percentil do índice de caça e 40% o do desconto (só com confiança alta ou média);
+  - `forte` ordena pelo ⚔ (`poder`) do jogo; `barganha`, pelo desconto; `nota`, pela nota;
+  - `pvp` usa `pesos_pvp` por `species_id` (60%) e o percentil do ⚔ (40%).
+- **Por que não o ⚔ para caçar:** no jogo (`shared/nota-pokemon.mjs`), `poder = nível × 10 × score`, e o score é a soma dos seis stats de nascimento numa escala de log entre o pior e o melhor nascimento possíveis. HP, DEF e SP.DEF pesam tanto quanto o ataque, e o log achata as diferenças: o dobro de ATK dá ~30% a mais de ⚔. Dividir o ⚔ pelo preço favorecia os baratos fracos.
 - **`padroes(...)`** mostra volume, prêmios por atributo, espécies, horários e compradores.
 
 ### `analise/pvp.py` (aba PvP)
@@ -517,6 +524,18 @@ robô atualiza o token sozinho quando o jogo manda `sessao.renovada`.
 - **Inicialização com o Windows:** teste abrindo o atalho pelo Explorer (`explorer.exe "<Startup>\PokeIdle Tracker.lnk"`), não por um terminal. Um processo iniciado pelo Explorer pode não enxergar pacotes instalados por um terminal com ambiente diferente.
 
 ---
+
+## 14.1 Fórmulas do jogo (Pokémon)
+
+Os módulos `shared/` do jogo são públicos (por exemplo, `https://pokeidle.io/shared/nota-pokemon.mjs`). Os que importam aqui:
+- **Stat:** `arred((base + refino + 2×IV) × nível/100 × qualidade^exp × potência × shiny × lendário)`.
+  - O expoente da qualidade é 0,95 para HP e SPD e 0,8 para os outros.
+  - A potência multiplica por 1; 1,05; 1,1; 1,25; 2 (P1 a P5). Shiny multiplica por 3; lendário e mítico, por 4.
+  - IV vai de 1 a 32 por stat (6 a 192 somados). A qualidade vai de 0,8 a 1,8, e metade dos nascimentos fica abaixo de ~1,08.
+- **Nota (N=):** de 0 a 10 **dentro da espécie**, no nível 100. O 0 é o pior nascimento possível (IV 6, Q 0,8, P1) e o 10 o melhor (IV 192, Q 1,8, P5, shiny), em escala de log da soma dos stats. Uma evolução sobe a nota em pelo menos 0,1. O ×4 do lendário fica fora da nota.
+- **⚔ (poder):** `nível × 10 × score`, com o score em log (ver `analise/pokemon.py`).
+- **Mercado:** só aceita Pokémon de nível ≥ 50 e nota ≥ 3,5. Shiny, P5, lendário e mítico passam livres. **Shiny só se anuncia em gemas** (desde 10/10/2026).
+- **Dano na caça:** `((2·nível/5 + 2) × poder do golpe × ATK/DEF) / 50 + 2`, × STAB × efetividade. Na caça, a efetividade é ampliada em 1,5: 2× vira 2,5× e 0,5× vira 0,33×. O golpe usa ATK ou SP.ATK conforme a categoria.
 
 ## 15. Armadilhas conhecidas
 

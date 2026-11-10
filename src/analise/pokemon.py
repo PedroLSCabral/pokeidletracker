@@ -11,6 +11,14 @@
                 mediana da espécie, para não confundir "P5 é caro" com "espécie cara"), horários e
                 quem compra/vende em volume.
   busca         dado um orçamento, procura na loja (pk_anuncios) o Pokémon ideal segundo um objetivo.
+
+Força para caçar: o ⚔ ("poder") do jogo NÃO mede isso bem. Ele soma os seis atributos (HP, DEF e SP.DEF
+pesam tanto quanto o ataque) e passa a soma por uma escala de log (shared/nota-pokemon.mjs do jogo:
+poder = nível × 10 × score, com o score em log entre o pior e o melhor nascimento). Um Pokémon com o
+dobro do ATK sai com um ⚔ só ~30% maior. Na caça o que decide é o dano por golpe, que no jogo é
+((2·nível/5 + 2) · poder do golpe · ATK / DEF) / 50 + 2, com ATK ou SP.ATK conforme o golpe. Por isso
+a busca usa o `indice_caca` (dano de um golpe, sem o golpe e a defesa do alvo, que são iguais para
+todos) para "caçar", "equilibrado" e "custo"; o ⚔ fica no objetivo "forte".
 """
 from __future__ import annotations
 
@@ -31,10 +39,11 @@ MIN_GRUPO = 3             # vendas da espécie (mesmo shiny e moeda) para ter um
 DIARIA_ANUNCIO_COINS = 100_000
 
 OBJETIVOS = {
-    "equilibrado": "forte e com preço justo (60% força, 40% desconto)",
-    "forte": "o mais forte (maior poder) que cabe no orçamento",
+    "equilibrado": "bom de caça e com preço justo (60% dano de caça, 40% desconto)",
+    "caca": "melhor para caçar e upar: maior dano por golpe (nível × ATK ou SP.ATK)",
+    "forte": "o maior ⚔ do jogo (a soma dos 6 atributos, a régua do ranking)",
     "barganha": "o maior desconto contra o preço justo",
-    "custo": "mais poder por cada gema/coin gasta",
+    "custo": "mais dano de caça por cada gema/coin gasta",
     "nota": "a maior nota",
     "pvp": "melhor para PvP: espécie forte no meta do rank (e contra quem você perde, com nick) + poder",
 }
@@ -42,6 +51,24 @@ OBJETIVOS = {
 # Faixas usadas pelo modelo (as mesmas da aba Padrões).
 FX_NIVEL = [99, 100, 200, 500, 1000, 10**9]                 # < 100 | 100 | 101-200 | 201-500 | 501-1000 | 1000+
 FX_NOTA = [3.4999, 3.6999, 3.8999, 4.0999, 4.2999, 9]
+
+
+def indice_caca(nivel, stats) -> tuple[float, str] | tuple[None, None]:
+    """Dano de um golpe na caça, sem o que é igual para todos (poder do golpe, DEF do alvo, STAB).
+
+    Da fórmula de dano do jogo: (2·nível/5 + 2) × ATK ou SP.ATK (o maior: o jogo usa, entre os golpes
+    prontos, o que tira mais dano). Os stats do anúncio já vêm no nível dele, com IV, qualidade,
+    potência e shiny. Devolve (índice, "físico"|"especial"); dividido por 100 para ficar legível.
+    """
+    if isinstance(stats, str):
+        try:
+            stats = json.loads(stats or "{}")
+        except ValueError:
+            stats = {}
+    atk, spa = (stats or {}).get("atk") or 0, (stats or {}).get("spAtk") or 0
+    if not nivel or not (atk or spa):
+        return None, None
+    return round((2 * nivel / 5 + 2) * max(atk, spa) / 100, 1), ("físico" if atk >= spa else "especial")
 
 
 def _faixa(v, tetos):
@@ -137,7 +164,8 @@ class Comparaveis:
         locais = self.locais.get((moeda, especie, sh, fl, fn), [])
         mod = self.modelos.get(moeda)
         estimativa = None
-        if mod and mod["n_grupo"].get((especie, sh), 0) >= MIN_GRUPO:
+        # `in base`: uma espécie cujas vendas saíram todas como fora da curva no 2º ajuste fica sem preço base.
+        if mod and mod["n_grupo"].get((especie, sh), 0) >= MIN_GRUPO and (especie, sh) in mod["base"]:
             ln = mod["base"][(especie, sh)] + mod["nivel"].get(fl, 0) + mod["nota"].get(fn, 0) + mod["pot"].get(pot, 0)
             estimativa = math.exp(ln)
         if locais:  # vendas parecidas, sem as absurdas (fora de 4× a mediana delas)
@@ -207,6 +235,8 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
         else:
             item.update(justo=None, comps=0, confianca=None, metodo=None, desconto=None, revenda_liquida=None, lucro_revenda=None)
         item["poder_por_preco"] = (r["poder"] or 0) / preco if preco else 0
+        item["caca"], item["ataque"] = indice_caca(r["nivel"], r["stats"])
+        item["caca_por_preco"] = (item["caca"] or 0) / preco if preco else 0
         res.append(item)
 
     # Ordenação pelo objetivo.
@@ -220,8 +250,10 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
     elif objetivo == "barganha":
         peso_conf = {"alta": 0, "média": 1, "baixa": 2, None: 3}
         res.sort(key=lambda x: (x["desconto"] is None, peso_conf[x["confianca"]] > 1, -(x["desconto"] or 0)))
+    elif objetivo == "caca":
+        res.sort(key=lambda x: (-(x["caca"] or 0), x["preco"]))
     elif objetivo == "custo":
-        res.sort(key=lambda x: -x["poder_por_preco"])
+        res.sort(key=lambda x: -x["caca_por_preco"])
     elif objetivo == "nota":
         res.sort(key=lambda x: (-(x["nota"] or 0), x["preco"]))
     elif objetivo == "pvp":
@@ -232,11 +264,11 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
             x["pontos"] = round(0.6 * x["nota_pvp"] + 0.4 * p_poder(x["poder"]), 3)
         res.sort(key=lambda x: -x["pontos"])
     else:  # equilibrado
-        p_poder, p_desc = pct("poder"), pct("desconto")
+        p_caca, p_desc = pct("caca"), pct("desconto")
         for x in res:
             # Desconto só pesa quando o preço justo é confiável; com confiança baixa ele fica neutro (0,5).
             d = p_desc(x["desconto"]) if x["confianca"] in ("alta", "média") else 0.5
-            x["pontos"] = round(0.6 * p_poder(x["poder"]) + 0.4 * d, 3)
+            x["pontos"] = round(0.6 * p_caca(x["caca"]) + 0.4 * d, 3)
         res.sort(key=lambda x: -x["pontos"])
     snap = con.execute("SELECT MAX(snap_ms) FROM pk_varreduras").fetchone()[0]
     return {"total": len(res), "itens": res[:limite], "objetivo": objetivo, "orcamento": orcamento, "moeda": moeda,

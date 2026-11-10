@@ -387,5 +387,13 @@ Na investigação da Fase 2, ver também se essa tela vem de uma API que dá par
 - **Visual:** o painel copia as três peças do jogo (quadro de madeira, botão roxo ou de madeira, vão escuro), com as mesmas cores e o fundo xadrez azul.
 - **Bandeja como a Steam:** duplo clique abre o painel, um clique abre o status e o botão direito abre um menu próprio, desenhado no visual do jogo, no lugar do menu cinza do Windows. O menu cinza continua como reserva, se o próprio falhar.
 
+## Força de caça na busca de Pokémon (10/11)
+Uma calculadora da comunidade ("vale a pena comprar?") simula a caça nível a nível com os módulos públicos do jogo (`shared/*.mjs`) e compara o XP por hora de dois Pokémon. Lendo esses módulos:
+- **O ⚔ do jogo não mede força de caça.** Ele soma os seis atributos numa escala de log: o dobro de ATK dá ~30% a mais de ⚔. Exemplo nos nossos dados: um Scizor P5 Nv 100 tem ATK 488 e ⚔ 518; um Dragonite P2 Nv 100, ATK 241 e ⚔ 403.
+- **O que decide a caça é o dano por golpe:** `(2·nível/5 + 2) × ATK ou SP.ATK`, na fórmula de dano do jogo. A busca ganhou o índice de caça (coluna "Caça") e o objetivo "caçar e upar". O índice passou a ser a força do "equilibrado" e do "mais por gema". Com o ⚔ por preço, o "mais por gema" premiava os baratos fracos. O ⚔ ficou só no objetivo "forte", como a régua do ranking.
+- **Confirmações para o preço justo:** a nota é por espécie, e o Mercado só aceita nota ≥ 3,5 e nível ≥ 50 (shiny, P5 e lendário passam livres), que é onde começam as faixas de nota do modelo. O shiny só se anuncia em gemas.
+- **Ficou de fora, por ora:** simular a caça inteira (mapas, HP e defesa dos selvagens, recargas e tempo morto por abate), como faz a calculadora. Seria o passo seguinte para comparar "o meu Pokémon de agora contra um candidato".
+- **Bug achado no caminho:** uma espécie cujas vendas saíam todas como fora da curva no 2º ajuste do modelo derrubava a busca com erro (KeyError).
+
 ## Perguntas em aberto
 - Os nomes no export para as outras raridades devem ser `Uncommon`, `Mythic` e `Legendary` (só vimos `Common` e `Rare`). Isso se confirma quando aparecerem vendas.

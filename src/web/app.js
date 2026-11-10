@@ -959,10 +959,11 @@ const TIPOS_PK = { NORMAL: 'Normal', FIRE: 'Fogo', WATER: 'Água', GRASS: 'Plant
   FIGHTING: 'Lutador', POISON: 'Veneno', GROUND: 'Terra', FLYING: 'Voador', PSYCHIC: 'Psíquico', BUG: 'Inseto',
   ROCK: 'Pedra', GHOST: 'Fantasma', DRAGON: 'Dragão', DARK: 'Sombrio', STEEL: 'Aço', FAIRY: 'Fada' };
 const OBJETIVOS_PK = {
-  equilibrado: 'equilibrado: forte e com preço justo',
-  forte: 'o mais forte (maior poder)',
+  equilibrado: 'equilibrado: bom de caça e com preço justo',
+  caca: 'melhor para caçar e upar (maior dano por golpe)',
+  forte: 'o maior ⚔ do jogo (soma dos 6 atributos)',
   barganha: 'o maior desconto vs preço justo',
-  custo: 'mais poder por gema/coin',
+  custo: 'mais dano de caça por gema/coin',
   nota: 'a maior nota',
   pvp: 'melhor para PvP (meta do rank + contra quem você perde)',
 };
@@ -997,7 +998,8 @@ async function buscarPk(e) {
   const m = d.moeda;
   $('#pkb-tabela').innerHTML = `
     <tr><th>#</th><th>Pokémon</th><th class="num">Nv</th><th class="num">P</th><th class="num">IV</th><th class="num">Qual.</th><th class="num">Nota</th>
-      <th class="num">Poder</th><th class="num">Preço</th><th class="num">Preço justo</th><th class="num">Desconto</th><th>Confiança</th>
+      <th class="num" title="⚔ do jogo: a soma dos 6 atributos em escala de log (a régua do ranking)">Poder</th>
+      <th class="num" title="Dano de um golpe na caça: (2 × nível ÷ 5 + 2) × o maior entre ATK e SP.ATK, ÷ 100. É o que decide quem mata mais rápido.">Caça</th><th class="num">Preço</th><th class="num">Preço justo</th><th class="num">Desconto</th><th>Confiança</th>
       <th class="num">Lucro revendendo</th><th>Vendedor</th></tr>
     ${d.itens.map((x, i) => `<tr title="IVs: ${Object.entries(x.ivs).map(([k, v]) => k + ' ' + v).join(' · ')}${x.faixa ? ` | vendas parecidas entre ${fmtNum(x.faixa[0], m)} e ${fmtNum(x.faixa[1], m)}` : ''}">
       <td>${i + 1}</td>
@@ -1005,13 +1007,14 @@ async function buscarPk(e) {
       <td class="num">${nf(0).format(x.nivel ?? 0)}</td><td class="num">${x.potencia ?? '—'}</td><td class="num">${x.iv ?? '—'}</td>
       <td class="num">${x.qualidade != null ? nf(3).format(x.qualidade) : '—'}</td><td class="num">${x.nota != null ? nf(3).format(x.nota) : '—'}</td>
       <td class="num">${nf(0).format(x.poder ?? 0)}</td>
+      <td class="num" title="${x.ataque ? 'ataque ' + x.ataque : ''}">${x.caca != null ? nf(0).format(x.caca) : '—'}</td>
       <td class="num">${htmlPreco(x.preco, m)}</td>
       <td class="num">${x.justo != null ? fmtNum(x.justo, m) + ` <span class="tag">${x.comps}</span>` : '<span class="aviso">sem vendas parecidas</span>'}</td>
       <td class="num">${x.desconto != null ? htmlVar(x.desconto) : '—'}</td>
       <td>${x.confianca ? `<span class="conf ${x.confianca}">${x.confianca}</span>` : '—'}</td>
       <td class="num ${x.lucro_revenda > 0 ? 'margem-pos' : 'margem-neg'}">${x.lucro_revenda != null ? (x.lucro_revenda > 0 ? '+' : '') + fmtNum(x.lucro_revenda, m) : '—'}</td>
       <td>${esc(x.vendedor)}</td></tr>`).join('')
-      || `<tr><td colspan="14" class="vazio" style="padding:20px">${d.varredura_ms ? 'Nenhum Pokémon da loja cabe nesse orçamento com esses filtros.' : 'O robô ainda não leu a loja de Pokémon (ele faz isso a cada 3 h).'}</td></tr>`}`;
+      || `<tr><td colspan="15" class="vazio" style="padding:20px">${d.varredura_ms ? 'Nenhum Pokémon da loja cabe nesse orçamento com esses filtros.' : 'O robô ainda não leu a loja de Pokémon (ele faz isso a cada 3 h).'}</td></tr>`}`;
 }
 
 async function carregarPadroesPk() {
