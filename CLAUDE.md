@@ -25,6 +25,8 @@ revenda, alertas, botão vender, Pokémon e PvP. A bandeja do Windows mantém os
 | Página (abas, janelas, estilos) | `src/web/index.html`, `app.js`, `app.css` |
 | Ícone da bandeja e supervisão | `src/bandeja.py` |
 | Janelinha de status | `src/mini.py` |
+| Menu do botão direito da bandeja | `src/menu_bandeja.py` |
+| Cores e fontes das janelas Tk | `src/tema.py` (as mesmas do `app.css`) |
 | Pastas e arquivos do projeto | `src/caminhos.py` |
 | Avisos (Windows, Discord, Telegram) | `src/notificar.py` |
 
@@ -44,8 +46,8 @@ revenda, alertas, botão vender, Pokémon e PvP. A bandeja do Windows mantém os
 - **Ao mudar estrutura, módulo, rota ou tabela, atualize `docs/ARQUITETURA.md` no mesmo commit.**
 
 ## Rodar e testar
-- **Tudo:** `iniciar.bat`. A pokébola aparece na bandeja; o clique esquerdo abre o status, o direito abre o menu.
-- **Religar depois de mudar Python:** use o menu da bandeja ou mate o processo `src\robo.py`/`src\painel.py`; a bandeja religa em ~30 s. Mudanças em `src/web/` só pedem recarregar a página.
+- **Tudo:** `iniciar.bat`. A pokébola aparece na bandeja: duplo clique abre o painel, um clique abre o status, o botão direito abre o menu.
+- **Religar depois de mudar Python:** use o menu da bandeja ou mate o processo `src\robo.py`/`src\painel.py`; a bandeja religa em ~30 s. Mudou `bandeja.py`, `menu_bandeja.py` ou `tema.py`? Use Sair no menu e ligue de novo. Mudanças em `src/web/` só pedem recarregar a página.
 - **Painel de teste sem mexer no que está rodando:** `python src/painel.py --porta 8771` (já está em `.claude/launch.json`).
 - **Robô sem tocar no jogo:** `python testes/teste_robo_sessao.py` (jogo falso, banco temporário).
 - **Verificação rápida:**

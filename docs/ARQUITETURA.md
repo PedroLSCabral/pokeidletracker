@@ -26,7 +26,7 @@ O pokeidle.io é um jogo idle de Pokémon com mercado de dinheiro real: as **gem
  ┌──────────────┐  WS  │  bandeja.py  (ícone na bandeja; liga e vigia os dois abaixo) │
  │ socket do    │◄────►│   ├─ robo.py    sessão contínua no jogo → grava no banco      │
  │ jogo         │      │   └─ painel.py  servidor HTTP 127.0.0.1:8770 (API + página)   │
- └──────────────┘      │  mini.py     janelinha de status (aberta pelo ícone)          │
+ └──────────────┘      │  mini.py     janelinha de status (um clique no ícone)         │
  ┌──────────────┐ HTTP │                                                             │
  │ /tracker/api │◄─────│  analise/pvp.py (pelo painel e pelo robô, sem login)          │
  └──────────────┘      │            data/market.db  ◄── todos leem/gravam aqui        │
@@ -54,6 +54,8 @@ pokeidletracker/
 │  ├─ robo.py               PROGRAMA: robô coletor (socket do jogo)
 │  ├─ painel.py             PROGRAMA: servidor do painel (API JSON + arquivos de web/)
 │  ├─ mini.py               PROGRAMA: janelinha de status (tkinter)
+│  ├─ menu_bandeja.py       menu do botão direito no visual do jogo (Tk numa thread da bandeja)
+│  ├─ tema.py               cores, fontes, moldura e pokébola das janelas Tk e do ícone
 │  ├─ caminhos.py           todas as pastas e arquivos do projeto (RAIZ, DADOS, BANCO, CONFIG, WEB…)
 │  ├─ notificar.py          avisos: Windows, Discord, Telegram
 │  ├─ coleta/               o que GRAVA no banco
@@ -104,14 +106,19 @@ inicialização com o Windows. Se for preciso mover, rode `python src/bandeja.py
 - **Quando um filho cai:**
   - com **código 3** (fatal), não religa e mostra uma notificação. É o caso de sessão recusada, robô duplicado ou porta ocupada;
   - com qualquer outro código, religa depois de 30 s. A espera dobra a cada queda seguida até 10 min e volta a 30 s depois de 10 min de pé.
-- **Menu do ícone:**
-  - Status agora (clique esquerdo, abre o `mini.py`);
-  - Abrir painel;
-  - estado do robô e do painel;
+- **Cliques no ícone, como na Steam** (`classe_icone()`, que estende o `pystray.Icon` e troca o `_on_notify`):
+  - **duplo clique** abre o painel no navegador;
+  - **um clique** abre o `mini.py`. Ele espera o tempo de duplo clique do Windows (`GetDoubleClickTime`) antes de agir, para um duplo clique não abrir as duas coisas;
+  - **botão direito** abre o menu no visual do jogo (`menu_bandeja.py`).
+- **Menu do botão direito:**
+  - no topo, o estado do robô (com a fase de `robo_agora.json`), do painel e a hora do último registro;
+  - Abrir painel e Status agora;
   - Ver log do robô e Abrir pasta de dados;
   - Reiniciar robô e Reiniciar painel;
   - Ligar junto com o Windows (cria ou apaga o atalho);
   - Sair.
+- **Menu cinza do Windows:** o mesmo menu também existe como `pystray.Menu`. Ele só aparece se o menu próprio não abrir (sem Tk, ou um erro ao montar). O motivo vai para `data/bandeja.log`.
+- **DPI:** a bandeja chama `SetProcessDpiAwareness(1)`, para o menu sair nítido em telas com escala.
 - **Linha de comando:** `--instalar` e `--remover` cuidam do atalho de inicialização; `--abrir` abre o painel no navegador.
 
 ### `robo.py`: o coletor
@@ -156,6 +163,17 @@ inicialização com o Windows. Se for preciso mover, rode `python src/bandeja.py
   - a fase atual, lida de `robo_agora.json`, com barra de progresso na leitura da loja;
   - os próximos horários, lidos da tabela `coleta` só para leitura, com as mesmas contas do robô;
   - a última linha do `robo.log`.
+
+### `menu_bandeja.py`: o menu do botão direito
+- **`MenuBandeja`** sobe um `tk.Tk()` escondido numa thread própria da bandeja. `mostrar(x, y, estado, itens)` pode ser chamado de qualquer thread: o pedido entra numa fila que o Tk lê a cada 60 ms.
+- **Itens:** `Item(texto, acao, ativo, marcado, destaque)`; `SEPARADOR` é `None`. Cada ação roda numa thread nova, para o menu não travar enquanto um processo reinicia.
+- **Janela:** `Toplevel` sem moldura do Windows (`overrideredirect`) e por cima de tudo, com o canto de baixo à direita no mouse, sem sair da área útil do monitor (`MonitorFromPoint`).
+- **Fecha** com Esc, ao perder o foco ou com um clique fora. O clique fora é vigiado com `GetAsyncKeyState`, porque o `FocusOut` nem sempre chega numa janela sem moldura.
+- **Visual:** quadro de madeira, título com contorno e dois vãos (estado e ações). A linha sob o mouse fica roxa.
+
+### `tema.py`: o visual das janelas Tk
+- As cores do jogo (as mesmas do `app.css`), as fontes (`TEXTO` = Segoe UI, `TITULO` = Tahoma) e `FASES` (texto e cor de cada fase do robô).
+- **Peças:** `moldura()` (quadro de madeira), `vao()` (área escura com filete), `titulo_contornado()` (Tahoma negrito branco com contorno, desenhado num `Canvas`) e `desenhar_pokebola()` (o ícone da bandeja, em pixel art 16×16).
 
 ---
 

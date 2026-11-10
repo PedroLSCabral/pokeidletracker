@@ -382,5 +382,10 @@ Na investigação da Fase 2, ver também se essa tela vem de uma API que dá par
 
 **Nomes:** a tela do jogo usa português (Bicicleta Comum, Casa Mítica) e o export usa inglês (Common Bicycle, Rare House). O sistema precisa de uma tabela de tradução entre os dois.
 
+## Visual do jogo e menu da bandeja (10/11)
+- **Fonte:** as fontes pixeladas (VT323 e Press Start 2P) ficavam pouco legíveis em várias escalas. O CSS público do jogo mostra que ele **não usa fonte pixelada**: o texto é Segoe UI e títulos, botões e números são Tahoma negrito com contorno escuro. O ar de pixel art vem das molduras. O painel passou a usar as mesmas fontes, que já vêm no Windows, e não baixa mais nada do Google Fonts.
+- **Visual:** o painel copia as três peças do jogo (quadro de madeira, botão roxo ou de madeira, vão escuro), com as mesmas cores e o fundo xadrez azul.
+- **Bandeja como a Steam:** duplo clique abre o painel, um clique abre o status e o botão direito abre um menu próprio, desenhado no visual do jogo, no lugar do menu cinza do Windows. O menu cinza continua como reserva, se o próprio falhar.
+
 ## Perguntas em aberto
 - Os nomes no export para as outras raridades devem ser `Uncommon`, `Mythic` e `Legendary` (só vimos `Common` e `Rare`). Isso se confirma quando aparecerem vendas.

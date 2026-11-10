@@ -1,6 +1,6 @@
 """Janelinha de status: o que o robô está fazendo agora e quando vem a próxima tarefa.
 
-Abre pelo ícone da pokébola na bandeja (clique esquerdo). Fecha no X ou com Esc. Não aparece
+Abre pelo ícone da pokébola na bandeja (um clique, ou "Status agora" no menu). Fecha no X ou com Esc. Não aparece
 na barra de tarefas. Lê data/robo_agora.json (escrito pelo robô) e o banco, a cada segundo.
 
     pythonw src\\mini.py
@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import caminhos  # noqa: E402
+import tema  # noqa: E402
 from coleta import coletor, lojapk  # noqa: E402
 
 RAIZ = caminhos.RAIZ
@@ -31,21 +32,11 @@ BANCO = caminhos.BANCO
 URL_PAINEL = "http://127.0.0.1:8770"
 TITULO = "PokeIdle Tracker - status"
 
-# mesmas cores do painel (src/web/app.css)
-MADEIRA, MADEIRA_CLARO, MADEIRA_ESCURO = "#b5654a", "#e3977a", "#6e3424"
-LINHA, LINHA_2, BORDA, GRADE = "#2b1d28", "#342431", "#170e15", "#3d2a37"
-TINTA, TINTA_2, TINTA_3, CREME = "#f3e9f1", "#c9b6c5", "#8f7a8b", "#fff1d6"
-SOBE, DESCE, OURO, GEMA, BOTAO = "#6fd38a", "#ff7b7b", "#f2c14e", "#ff8fd0", "#f2c230"
-
-FASES = {
-    "conectando": ("Entrando no jogo", OURO),
-    "export": ("Baixando o export", OURO),
-    "vitrine": ("Lendo a vitrine", OURO),
-    "loja": ("Lendo a loja de Pokémon", GEMA),
-    "alertas": ("Conferindo alertas", OURO),
-    "esperando": ("Esperando", SOBE),
-    "parado": ("Parado", DESCE),
-}
+# cores do jogo, as mesmas do painel (src/tema.py e src/web/app.css)
+LINHA, BORDA, GRADE = tema.VAO, tema.MAD_LINHA, tema.VAO_LUZ
+TINTA, TINTA_2, TINTA_3, CREME = tema.TINTA, tema.TINTA_2, tema.TINTA_3, tema.CREME
+SOBE, DESCE, OURO, GEMA = tema.SOBE, tema.DESCE, tema.OURO, tema.GEMA
+FASES = tema.FASES
 
 
 # ---------------------------------------------------------------- leitura do estado
@@ -129,7 +120,7 @@ class Mini(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(TITULO)
-        self.configure(bg=MADEIRA_ESCURO)
+        self.configure(bg=tema.MAD_LINHA)
         self.resizable(False, False)
         self.attributes("-toolwindow", True)   # sem botão na barra de tarefas
         self.attributes("-topmost", True)
@@ -139,24 +130,20 @@ class Mini(tk.Tk):
         except tk.TclError:
             pass
 
-        f = "Consolas"
-        self.f_titulo = (f, 10, "bold")
-        self.f_fase = (f, 13, "bold")
-        self.f = (f, 10)
-        self.f_peq = (f, 9)
+        self.f_rotulo = (tema.TITULO, 8, "bold")
+        self.f_fase = (tema.TITULO, 12, "bold")
+        self.f = (tema.TEXTO, 10)
+        self.f_peq = (tema.TEXTO, 9)
 
-        # moldura de madeira, como os quadros do painel
-        moldura = tk.Frame(self, bg=MADEIRA, padx=3, pady=3)
-        moldura.pack(fill="both", expand=True, padx=2, pady=2)
-        cab = tk.Frame(moldura, bg=MADEIRA)
-        cab.pack(fill="x", pady=(0, 3))
+        # quadro de madeira com um vão escuro dentro, como os do painel e do jogo
+        moldura = tema.moldura(tk, self)
+        cab = tk.Frame(moldura, bg=tema.MAD)
+        cab.pack(fill="x", pady=(0, 6))
         self._icone = self._pokebola()
-        tk.Label(cab, image=self._icone, bg=MADEIRA).pack(side="left", padx=(2, 6))
-        tk.Label(cab, text="POKEIDLE TRACKER", font=self.f_titulo, fg=CREME, bg=MADEIRA).pack(side="left")
+        tk.Label(cab, image=self._icone, bg=tema.MAD).pack(side="left", padx=(0, 6))
+        tema.titulo_contornado(tk, cab, "POKEIDLE TRACKER", 10).pack(side="left")
 
-        corpo = tk.Frame(moldura, bg=LINHA, padx=10, pady=8, highlightthickness=2,
-                         highlightbackground=BORDA)
-        corpo.pack(fill="both", expand=True)
+        corpo = tema.vao(tk, moldura, padx=12, pady=10)
 
         leds = tk.Frame(corpo, bg=LINHA)
         leds.pack(fill="x")
@@ -164,7 +151,7 @@ class Mini(tk.Tk):
         self.led_painel = self._led(leds, "PAINEL")
 
         tk.Frame(corpo, bg=GRADE, height=2).pack(fill="x", pady=7)
-        tk.Label(corpo, text="AGORA", font=self.f_peq, fg=TINTA_3, bg=LINHA).pack(anchor="w")
+        tk.Label(corpo, text="AGORA", font=self.f_rotulo, fg=TINTA_3, bg=LINHA).pack(anchor="w")
         self.fase = tk.Label(corpo, font=self.f_fase, bg=LINHA, anchor="w")
         self.fase.pack(fill="x")
         self.barra = tk.Canvas(corpo, width=self.LARG - 50, height=14, bg=BORDA,
@@ -177,7 +164,7 @@ class Mini(tk.Tk):
         self.det2.pack(fill="x")
 
         tk.Frame(corpo, bg=GRADE, height=2).pack(fill="x", pady=7)
-        tk.Label(corpo, text="PRÓXIMOS", font=self.f_peq, fg=TINTA_3, bg=LINHA).pack(anchor="w")
+        tk.Label(corpo, text="PRÓXIMOS", font=self.f_rotulo, fg=TINTA_3, bg=LINHA).pack(anchor="w")
         grade = tk.Frame(corpo, bg=LINHA)
         grade.pack(fill="x")
         grade.columnconfigure(0, weight=1)
@@ -196,8 +183,8 @@ class Mini(tk.Tk):
                                wraplength=self.LARG - 50)
         self.ultimo.pack(fill="x")
 
-        botoes = tk.Frame(moldura, bg=MADEIRA)
-        botoes.pack(fill="x", pady=(4, 0))
+        botoes = tk.Frame(moldura, bg=tema.MAD)
+        botoes.pack(fill="x", pady=(8, 2))
         self._botao(botoes, "Abrir painel", lambda: webbrowser.open(URL_PAINEL), destaque=True).pack(side="left")
         self._botao(botoes, "Log", lambda: os.startfile(LOG)).pack(side="left", padx=4)
         self._botao(botoes, "Fechar", self.destroy).pack(side="right")
@@ -210,8 +197,7 @@ class Mini(tk.Tk):
     def _pokebola(self):
         try:
             from PIL import ImageTk
-            import bandeja
-            return ImageTk.PhotoImage(bandeja.desenhar_icone().resize((24, 24), 0))
+            return ImageTk.PhotoImage(tema.desenhar_pokebola(64).resize((24, 24), 0))
         except Exception:  # noqa: BLE001 - o ícone é só enfeite
             return tk.PhotoImage(width=1, height=1)
 
@@ -221,15 +207,18 @@ class Mini(tk.Tk):
         led = tk.Canvas(q, width=10, height=10, bg=LINHA, highlightthickness=0)
         led.create_rectangle(1, 1, 9, 9, outline=BORDA, fill=TINTA_3, tags="luz")
         led.pack(side="left", padx=(0, 5))
-        txt = tk.Label(q, text=nome, font=self.f_peq, fg=TINTA_2, bg=LINHA)
+        txt = tk.Label(q, text=nome, font=self.f_rotulo, fg=TINTA_2, bg=LINHA)
         txt.pack(side="left")
         return led, txt, nome
 
     def _botao(self, pai, texto, acao, destaque=False):
-        cor, tinta = (BOTAO, "#2a1a08") if destaque else (MADEIRA_CLARO, "#2a1a08")
-        return tk.Button(pai, text=texto, command=acao, font=self.f_peq, bg=cor, fg=tinta,
-                         activebackground=CREME, relief="flat", bd=0, padx=8, pady=2,
-                         highlightthickness=2, highlightbackground=MADEIRA_ESCURO, cursor="hand2")
+        """Botão do jogo: roxo para a ação principal, madeira para as outras."""
+        cor, luz = (tema.RX, tema.RX_CLR) if destaque else (tema.MAD_ESC, tema.MAD)
+        return tk.Button(pai, text=texto, command=acao, font=(tema.TITULO, 9, "bold"), bg=cor,
+                         fg="#ffffff" if destaque else tema.SOBRE_MAD_DIM, activebackground=luz,
+                         activeforeground="#ffffff", relief="flat", bd=0, padx=10, pady=3,
+                         highlightthickness=2, highlightbackground=tema.MAD_LINHA,
+                         highlightcolor=tema.MAD_LINHA, cursor="hand2")
 
     def _acender(self, led, ligado, texto):
         canvas, label, nome = led

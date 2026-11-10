@@ -1,8 +1,12 @@
 """Ícone na bandeja do Windows que mantém o robô e o painel rodando em segundo plano.
 
 Sem janelas na barra de tarefas: o robô e o painel rodam como processos ocultos, e este
-ícone (perto do relógio) é o único sinal de que estão ligados. Clique esquerdo abre a
-janelinha de status (src/mini.py); o direito tem o menu: painel, log, reiniciar, sair. Se um dos dois cair, ele é religado.
+ícone (perto do relógio) é o único sinal de que estão ligados. Como na Steam:
+  - duplo clique abre o painel no navegador;
+  - um clique abre a janelinha de status (src/mini.py);
+  - o botão direito abre o menu no visual do jogo (src/menu_bandeja.py): estado, painel, log,
+    reiniciar, ligar com o Windows e sair.
+Se o robô ou o painel cair, ele é religado.
 
 Uso:
     pythonw src\\bandeja.py            liga tudo (é o que o atalho de inicialização faz)
@@ -23,6 +27,7 @@ import webbrowser
 from pathlib import Path
 
 import caminhos  # noqa: E402
+import tema  # noqa: E402
 
 RAIZ = caminhos.RAIZ
 DADOS = caminhos.DADOS
@@ -162,33 +167,62 @@ def ultimo_registro_robo() -> str:
         return "?"
 
 
-# ---------------------------------------------------------------- ícone
+# ---------------------------------------------------------------- ícone e cliques
 
-def desenhar_icone():
-    """Pokébola em pixel art 16x16, ampliada sem suavizar."""
-    from PIL import Image
-    mapa = [
-        ".....KKKKKK.....",
-        "...KKRRRRRRKK...",
-        "..KRRRRRRWWRRK..",
-        ".KRRRRRRRRWWRRK.",
-        ".KRRRRRRRRRRRRK.",
-        "KRRRRRRRRRRRRRRK",
-        "KRRRRRKKKKRRRRRK",
-        "KKKKKKKWWKKKKKKK",
-        "KKKKKKKWWKKKKKKK",
-        "KWWWWWKKKKWWWWWK",
-        "KWWWWWWWWWWWWWWK",
-        ".KWWWWWWWWWWWWK.",
-        ".KWWWWWWWWWWWWK.",
-        "..KWWWWWWWWWWK..",
-        "...KKWWWWWWKK...",
-        ".....KKKKKK.....",
-    ]
-    cores = {"K": (26, 16, 24, 255), "R": (216, 64, 64, 255), "W": (240, 232, 220, 255), ".": (0, 0, 0, 0)}
-    img = Image.new("RGBA", (16, 16))
-    img.putdata([cores[c] for linha in mapa for c in linha])
-    return img.resize((64, 64), Image.NEAREST)
+WM_LBUTTONUP, WM_LBUTTONDBLCLK, WM_RBUTTONUP = 0x0202, 0x0203, 0x0205
+
+
+def fase_robo() -> str:
+    """O que o robô diz estar fazendo agora (data/robo_agora.json), em texto."""
+    try:
+        import json
+        fase = json.loads(caminhos.AGORA_ROBO.read_text(encoding="utf-8")).get("fase") or ""
+    except (OSError, ValueError):
+        return ""
+    return tema.FASES.get(fase, (fase, None))[0]
+
+
+def classe_icone(pystray):
+    """O ícone do pystray com os cliques da Steam: duplo clique, clique simples e menu próprio.
+
+    O pystray só conhece clique simples (ação padrão) e o menu cinza do Windows. Aqui o clique
+    simples espera o tempo de duplo clique do Windows antes de agir, para um duplo clique não
+    abrir as duas coisas. Se o menu próprio falhar, cai para o menu do Windows.
+    """
+    class Icone(pystray.Icon):
+        ao_duplo = ao_simples = ao_direito = None
+        _timer = None
+        _ignorar_solta = False
+
+        def _cancelar(self):
+            if self._timer:
+                self._timer.cancel()
+                self._timer = None
+
+        def _on_notify(self, wparam, lparam):
+            if lparam == WM_LBUTTONDBLCLK:
+                self._cancelar()
+                self._ignorar_solta = True  # o Windows manda mais um "soltou" depois do duplo clique
+                threading.Thread(target=self.ao_duplo, daemon=True).start()
+            elif lparam == WM_LBUTTONUP:
+                if self._ignorar_solta:
+                    self._ignorar_solta = False
+                    return
+                self._cancelar()
+                espera = ctypes.windll.user32.GetDoubleClickTime() / 1000
+                self._timer = threading.Timer(espera, self.ao_simples)
+                self._timer.daemon = True
+                self._timer.start()
+            elif lparam == WM_RBUTTONUP and self.ao_direito:
+                try:
+                    self.ao_direito()
+                except Exception as e:  # noqa: BLE001
+                    print(time.strftime("[%Y-%m-%d %H:%M:%S]"), f"menu próprio falhou: {e}", flush=True)
+                    super()._on_notify(wparam, lparam)
+            else:
+                super()._on_notify(wparam, lparam)
+
+    return Icone
 
 
 def main() -> None:
@@ -210,6 +244,10 @@ def main() -> None:
 
     # pythonw não tem console: erros da própria bandeja vão para um arquivo.
     sys.stdout = sys.stderr = _abrir_log("bandeja.log")
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # menu nítido em telas com escala
+    except Exception:  # noqa: BLE001
+        pass
 
     robo = Filho("Robô", "robo.py", None, "robo.erros.log",
                  "veja o motivo em data\\robo.log (se a sessão foi recusada, rode "
@@ -269,9 +307,13 @@ def main() -> None:
         subprocess.Popen([_python(janela=False), str(RAIZ / "src" / "mini.py")], cwd=RAIZ,
                          creationflags=SEM_JANELA)
 
+    def abrir_painel(*_):
+        webbrowser.open(URL_PAINEL)
+
+    # Menu cinza do Windows: só aparece se o menu no visual do jogo não puder abrir.
     menu = pystray.Menu(
-        pystray.MenuItem("Status agora", abrir_mini, default=True),  # clique esquerdo no ícone
-        pystray.MenuItem("Abrir painel", lambda *_: webbrowser.open(URL_PAINEL)),
+        pystray.MenuItem("Abrir painel", abrir_painel, default=True),
+        pystray.MenuItem("Status agora", abrir_mini),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(status_texto, None, enabled=False),
         pystray.MenuItem(painel_texto, None, enabled=False),
@@ -283,8 +325,48 @@ def main() -> None:
         pystray.MenuItem("Ligar junto com o Windows", alternar_inicio, checked=com_inicio),
         pystray.MenuItem("Sair (desliga robô e painel)", sair),
     )
-    icon = pystray.Icon("pokeidle-tracker", desenhar_icone(), "PokeIdle Tracker", menu)
+    icon = classe_icone(pystray)("pokeidle-tracker", tema.desenhar_pokebola(), "PokeIdle Tracker", menu)
     parar = threading.Event()
+
+    try:
+        import menu_bandeja
+        menu_jogo = menu_bandeja.MenuBandeja()
+    except Exception as e:  # noqa: BLE001 - sem Tk, fica o menu do Windows
+        print(time.strftime("[%Y-%m-%d %H:%M:%S]"), f"menu próprio indisponível: {e}", flush=True)
+        menu_jogo = None
+
+    def luz(estado: str) -> str:
+        return tema.SOBE if estado == "rodando" else tema.OURO if estado == "religando" else tema.DESCE
+
+    def abrir_menu_jogo():
+        from ctypes import wintypes
+        pt = wintypes.POINT()
+        ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+        fase = fase_robo() if robo.estado == "rodando" else ""
+        estado = [
+            ("ROBÔ", robo.estado + (f" · {fase}" if fase else ""), luz(robo.estado)),
+            ("PAINEL", "no ar" if painel.estado == "rodando" else painel.estado, luz(painel.estado)),
+            ("ÚLTIMO REGISTRO", ultimo_registro_robo(), tema.TINTA_3),
+        ]
+        I = menu_bandeja.Item
+        itens = [
+            I("Abrir painel", abrir_painel, destaque=True),
+            I("Status agora", abrir_mini),
+            menu_bandeja.SEPARADOR,
+            I("Ver log do robô", lambda: abrir_log(None, None)),
+            I("Abrir pasta de dados", lambda: abrir_pasta(None, None)),
+            menu_bandeja.SEPARADOR,
+            I("Reiniciar robô", lambda: (robo.reiniciar(), icon.update_menu())),
+            I("Reiniciar painel", lambda: (painel.reiniciar(), icon.update_menu())),
+            menu_bandeja.SEPARADOR,
+            I("Ligar junto com o Windows", lambda: alternar_inicio(icon, None), marcado=com_inicio()),
+            I("Sair (desliga robô e painel)", lambda: sair(icon, None)),
+        ]
+        menu_jogo.mostrar(pt.x, pt.y, estado, itens)
+
+    icon.ao_duplo = abrir_painel
+    icon.ao_simples = abrir_mini
+    icon.ao_direito = abrir_menu_jogo if menu_jogo else None
 
     def vigia():
         while not parar.wait(5):

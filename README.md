@@ -26,8 +26,9 @@ O plano completo, as descobertas sobre o jogo e as decisões estão em [docs/PLA
    ```
    O comando pede o nick e o token, copiados do console do navegador; o passo a passo está no [docs/PLANO.md](docs/PLANO.md), Fase 2. Eles ficam em `config.local.json`, que **nunca** vai para o git.
 3. **Ligue tudo com dois cliques em `iniciar.bat`.** O robô e o painel rodam escondidos, e aparece uma pokébola na bandeja, perto do relógio:
-   - o clique esquerdo abre uma janelinha de status (o que o robô está fazendo e quando é a próxima tarefa);
-   - o clique direito abre o menu (painel, log, reiniciar, ligar com o Windows, sair).
+   - o duplo clique abre o painel;
+   - um clique abre uma janelinha de status (o que o robô está fazendo e quando é a próxima tarefa);
+   - o botão direito abre o menu, no visual do jogo (estado, painel, log, reiniciar, ligar com o Windows, sair).
 4. **Abra o painel em http://127.0.0.1:8770.**
 
 Para ligar junto com o Windows, marque a opção no menu da pokébola ou rode `python src/bandeja.py --instalar`.
@@ -42,6 +43,7 @@ Para ligar junto com o Windows, marque a opção no menu da pokébola ou rode `p
 | `src/robo.py` | Robô coletor: fica conectado ao jogo e lê a vitrine, o export e a loja de Pokémon |
 | `src/painel.py` | Servidor do painel (API JSON + a página de `src/web/`) |
 | `src/mini.py` | Janelinha de status, que abre pelo ícone |
+| `src/menu_bandeja.py`, `src/tema.py` | Menu do botão direito e o visual do jogo nas janelas da bandeja |
 | `src/coleta/` | O que grava no banco: esquema e importação (`importer`), vendas/vitrine/agenda (`coletor`), loja de Pokémon (`lojapk`) |
 | `src/analise/` | O que calcula: revenda e alertas (`sinais`), botão vender (`venda`), Pokémon (`pokemon`), PvP (`pvp`) |
 | `src/web/` | A página do painel com o visual do jogo (HTML, CSS e JS sem dependências; ícones carregados do site do jogo) |
