@@ -142,6 +142,7 @@
   <section id="aba-pokemon" class="aba-corpo hidden">
     <div class="pk-sub" role="tablist">
       <button class="chip ativa" data-pksub="buscar">Encontrar Pokémon</button>
+      <button class="chip" data-pksub="pvp">PvP</button>
       <button class="chip" data-pksub="padroes">Padrões do mercado</button>
       <button class="chip" data-pksub="vendas">Vendas recentes</button>
     </div>
@@ -164,6 +165,26 @@
         <p class="explica" id="pkb-explica">O <b>preço justo</b> de cada anúncio vem das vendas parecidas dos últimos 14 dias (mesma espécie, mesmo shiny, potência/nota/IV/qualidade/nível mais próximos). <b>Desconto</b> = quanto o anúncio está abaixo disso.</p>
         <div class="tabela-wrap" style="max-height:640px"><table class="tabela" id="pkb-tabela"></table></div>
         <p class="aviso">A loja é lida a cada 3 h: um anúncio da lista pode já ter sido vendido. Para comprar, procure a espécie no Mercado do jogo e confira o vendedor e o preço. Revenda líquida = preço justo − taxa progressiva do jogo (− diária de 100 mil coins, se em coins).</p>
+      </div>
+    </div>
+
+    <div class="pk-painel hidden" id="pk-pvp">
+      <div class="janela">
+        <div class="janela-titulo">Análise de PvP <span class="sub" id="pvp-sub"></span></div>
+        <div class="janela-corpo">
+          <form class="pk-form" id="pvp-form">
+            <label>Seu nick <input id="pvp-nick" class="campo" type="search" required minlength="3" maxlength="20" placeholder="nick no jogo" autocomplete="off"></label>
+            <label>Meta de qual rank <select id="pvp-faixa" class="campo">
+              <option value="">o seu rank</option><option value="todas">todos</option><option value="baixo">low elo</option>
+              <option value="alto">high elo</option><option value="ouro">Ouro</option><option value="platina">Platina</option>
+              <option value="diamante">Diamante</option><option value="mestre">Mestre+</option></select></label>
+            <label>Quero gastar até <input id="pvp-orc" class="campo" type="number" min="1" step="any" placeholder="opcional"></label>
+            <label>Moeda <select id="pvp-moeda" class="campo"><option value="gems">gemas</option><option value="coins">coins</option></select></label>
+            <button class="btn-primario" type="submit">Analisar</button>
+          </form>
+          <p class="explica">Os dados vêm do <b>Tracker</b> do próprio jogo (o botão "Tracker" do PvP), que é público: nada aqui entra na sua conta. A primeira análise leva uns 30 s (o painel pede devagar ao site); depois fica guardada por 5 min para você e 6 h para o meta.</p>
+          <div id="pvp-corpo"></div>
+        </div>
       </div>
     </div>
 

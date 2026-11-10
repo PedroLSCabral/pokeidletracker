@@ -22,6 +22,7 @@ import analise_pokemon  # noqa: E402
 import coletor  # noqa: E402
 import importer  # noqa: E402
 import notificar  # noqa: E402
+import pvp  # noqa: E402
 import sinais  # noqa: E402
 import venda  # noqa: E402
 
@@ -462,15 +463,25 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(analise_pokemon.padroes(con, moeda, int(q.get("dias", 7))))
                 if url.path == "/api/pk/buscar":
                     num = lambda k, d=0: float(q[k]) if q.get(k, "").strip() else d  # noqa: E731
+                    objetivo = q.get("objetivo", "equilibrado")
+                    pesos = None
+                    if objetivo == "pvp":
+                        pesos = pvp.pesos_especies(con, q.get("pvp_faixa", "alto")[:12], q.get("pvp_nick", "").strip()[:20])
                     return self._json(analise_pokemon.buscar(
-                        con, num("orcamento", 1e18), moeda, q.get("objetivo", "equilibrado"),
+                        con, num("orcamento", 1e18), moeda, objetivo,
                         q.get("especie", "").strip()[:40], q.get("tipo", "")[:12], q.get("shiny") == "1",
-                        int(num("pmin")), int(num("nivel")), num("nota")) | {"objetivos": analise_pokemon.OBJETIVOS})
+                        int(num("pmin")), int(num("nivel")), num("nota"), pesos_pvp=pesos) | {"objetivos": analise_pokemon.OBJETIVOS})
+                if url.path == "/api/pvp":
+                    orc = float(q["orcamento"]) if q.get("orcamento", "").strip() else None
+                    return self._json(pvp.analisar(con, q.get("nick", "")[:20], q.get("faixa", "")[:12], orc,
+                                                   q.get("moeda") if q.get("moeda") in ("gems", "coins") else "gems"))
                 if url.path == "/api/venda":
                     return self._json(api_venda(con, q.get("nome", "").strip()[:80], min(max(int(q.get("qtd", 1) or 1), 1), 1_000_000)))
                 if url.path == "/api/alertas/novos":
                     return self._json(api_alertas_novos(con, int(q.get("desde", -1))))
                 return self._json({"erro": "rota desconhecida"}, 404)
+            except pvp.ErroPvP as e:
+                return self._json({"erro": str(e)}, 400)
             except Exception as e:
                 return self._json({"erro": repr(e)}, 500)
             finally:

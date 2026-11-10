@@ -114,6 +114,32 @@ Botão **vender** em cada item da lista do mercado e no título do detalhe. Abre
 - **Confiança:** baixa com menos de 3 dias de coleta, média até 7 dias. O horário com mais compras só aparece com 3+ dias.
 - **Fragmentos:** a janela também compara vender com juntar 10 e montar (valor esperado, com e sem as raridades altas).
 
+### PvP (feito em 09/11)
+Aba Pokémon → **PvP**, mais o objetivo "melhor para PvP" na busca de Pokémon.
+- **De onde vêm os dados.** O botão "Tracker" do PvP abre `pokeidle.io/tracker`, um site público com JSON em `/tracker/api/*`:
+  - `jogador?nick=` traz o perfil, o rank, os counters do jogador (para quem ele mais perde), as vítimas e as últimas 20 partidas com os dois times;
+  - `meta?faixa=` traz as espécies com uso, vitórias e dano;
+  - `pokemon?id=` traz quem ganha e quem perde de cada espécie;
+  - `ladder` traz o ranking.
+
+  Não precisa de login, então não toca nas contas nem derruba o Idle Deck.
+- **Pedidos com calma** (`src/pvp.py`):
+  - 1,5 s entre um pedido e outro;
+  - cache no banco (`pvp_cache`): 5 min para o seu perfil, 6 h para o meta e os times do topo, 12 h para as páginas de espécie;
+  - se o site recusar ou cair, usa a cópia guardada;
+  - o robô pré-carrega o meta e os 10 primeiros do ranking a cada 6 h, numa thread à parte para não atrasar a vitrine.
+- **A análise:**
+  - **Seu time:** as espécies das últimas 5 partidas.
+  - **Ameaças:** os counters da temporada (as derrotas) mais quem estava no time do outro nas derrotas recentes, com peso maior para as recentes e para o dano.
+  - **Tipos que te castigam** e **buracos do time:** tipos de ataque que pegam 2 ou mais do time. A tabela de tipos é a da série, a mesma de `shared/tipo-efetividade.mjs` do jogo.
+  - **Sugestões, de 3 sinais:**
+    - 45%: quem ganha das suas ameaças no PvP inteiro, só com 20 ou mais confrontos e confiança n/(n+60);
+    - 35%: a taxa no meta do seu rank, puxada para 50% com poucas partidas;
+    - 20%: o encaixe de tipos (resiste aos golpes das ameaças, bate forte nelas, tapa os buracos).
+  - O que já está no time fica de fora. Com orçamento, cada sugestão mostra o anúncio mais forte e o mais barato da loja que cabem nele.
+- **Meta do rank:** os mais usados, a melhor taxa (500+ partidas) e os times dos 10 primeiros do ranking.
+- **Busca de Pokémon:** o objetivo "PvP" ordena por 60% a nota de PvP da espécie (meta do high elo e, com o nick salvo, as suas ameaças) e 40% o poder do anúncio.
+
 ## Estrutura prevista
 
 ```

@@ -359,3 +359,9 @@ main { padding: 16px; max-width: 1500px; margin: 0 auto; }
 .venda-precos tr.indicada td { background: var(--linha-2); }
 .venda-precos tr.indicada td:first-child { box-shadow: inset 4px 0 0 var(--ouro); }
 .venda-precos td:first-child { white-space: normal; min-width: 220px; }
+
+/* ---------- PvP ---------- */
+#pvp-corpo .caixa p { margin: 4px 0; color: var(--tinta-2); font-size: 18px; }
+#pvp-corpo .caixa p.aviso { font-size: 16px; color: var(--tinta-3); padding: 0; }
+#pvp-corpo .desce { color: var(--desce); }
+#pvp-corpo > .tiles { margin-top: 10px; }

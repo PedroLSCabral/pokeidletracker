@@ -8,7 +8,7 @@ Um robô entra no jogo com uma conta só para coleta e grava num banco SQLite lo
 - a vitrine de itens (menor anúncio e média de 7 dias de cada item), a cada minuto;
 - a loja de Pokémon inteira, a cada 3 horas.
 
-Um painel web em pixel art mostra preços, sinais de revenda, alertas e um analisador de Pokémon. O analisador estima o preço justo de cada anúncio e procura o melhor Pokémon para um orçamento.
+Um painel web em pixel art mostra preços, sinais de revenda, alertas e um analisador de Pokémon. O analisador estima o preço justo de cada anúncio e procura o melhor Pokémon para um orçamento. A aba PvP lê o seu histórico no Tracker público do jogo e sugere o que comprar contra quem você mais perde.
 
 O plano completo, as descobertas sobre o jogo e as decisões estão em [PLANO.md](PLANO.md).
 
@@ -48,6 +48,7 @@ Para ligar junto com o Windows, marque a opção no menu da pokébola ou rode `p
 | `src/sinais.py` | Fase 3: sinais de revenda, regras e histórico de alertas |
 | `src/notificar.py` | Avisos pelo Windows, Discord ou Telegram |
 | `src/analise_pokemon.py` | Fase 4: preço justo, busca por orçamento e padrões de mercado |
+| `src/pvp.py` | Aba PvP: seu histórico no Tracker público do jogo, para quem você perde, meta do rank e quem comprar |
 | `src/venda.py` | Botão "vender": em qual moeda, por quanto e quando vender um item que você dropou |
 | `src/userscript/`, `extras/` | Primeira tentativa de coleta, por userscript (não funcionou no Idle Deck) |
 

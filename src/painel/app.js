@@ -834,6 +834,126 @@ function ligarSom() {
   setInterval(checarAlertasNovos, 30_000);
 }
 
+// ------------------------------------------------------------------ PvP (Tracker do jogo)
+const NOME_FAIXA = { todas: 'todos os ranks', baixo: 'low elo', alto: 'high elo', bronze: 'Bronze', prata: 'Prata', ouro: 'Ouro',
+  platina: 'Platina', diamante: 'Diamante', mestre: 'Mestre+' };
+const NOME_TIER = { bronze: 'Bronze', prata: 'Prata', ouro: 'Ouro', platina: 'Platina', diamante: 'Diamante', mestre: 'Mestre',
+  graomestre: 'Grão Mestre', challenger: 'Challenger' };
+const pct = (v) => (v == null ? '—' : nf(1).format(v * 100) + '%');
+const lerLocal = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
+const gravarLocal = (k, v) => { try { localStorage.setItem(k, v); } catch { /* sem armazenamento: só não lembra */ } };
+
+async function analisarPvp(e) {
+  e?.preventDefault();
+  const nick = $('#pvp-nick').value.trim();
+  if (!nick) return;
+  gravarLocal('pvp_nick', nick);
+  $('#pvp-corpo').innerHTML = '<div class="vazio">Lendo o Tracker do jogo… (a primeira vez leva uns 30 s)</div>';
+  let d;
+  try {
+    d = await api('/api/pvp', { nick, faixa: $('#pvp-faixa').value, orcamento: $('#pvp-orc').value, moeda: $('#pvp-moeda').value });
+  } catch (err) {
+    $('#pvp-corpo').innerHTML = `<div class="vazio">Não deu: ${esc(err.message)}</div>`;
+    return;
+  }
+  estado.pvp = d;
+  desenharPvp();
+}
+
+function desenharPvp() {
+  const d = estado.pvp;
+  if (!d) return;
+  const r = d.rank || {}, t = d.totais || {}, m = d.moeda;
+  $('#pvp-sub').textContent = `${d.nick} · temporada ${d.temporada || '—'} · meta de ${NOME_FAIXA[d.faixa] || d.faixa}${d.velho ? ' · dados guardados (o Tracker não respondeu)' : ''}`;
+  const tiles = `
+    <div class="tiles">
+      <div class="tile"><div class="rot">Rank</div><div class="val">${esc(NOME_TIER[r.tierId] || r.tierId || '—')}</div><div class="det">${r.pontos != null ? nf(0).format(r.pontos) + ' PR' : 'sem partidas ranqueadas'}${r.posicao ? ` · #${nf(0).format(r.posicao)}` : ''}</div></div>
+      <div class="tile"><div class="rot">Temporada</div><div class="val">${nf(0).format(r.vitorias || 0)}V · ${nf(0).format(r.derrotas || 0)}D</div><div class="det">${pct(r.winrate)} de vitórias</div></div>
+      <div class="tile"><div class="rot">Últimas partidas</div><div class="val">${d.vitorias_recentes} de ${d.partidas_recentes}</div><div class="det">vitórias</div></div>
+      <div class="tile"><div class="rot">Desde sempre</div><div class="val">${pct(t.partidas ? t.vitorias / t.partidas : null)}</div><div class="det">${nf(0).format(t.partidas || 0)} partidas</div></div>
+    </div>`;
+
+  const timeHtml = `
+    <div class="caixa"><h3>Seu time agora <span class="aviso">(das últimas 5 partidas)</span></h3>
+      <div class="tabela-wrap" style="max-height:none"><table class="tabela">
+        <tr><th>Pokémon</th><th class="num">Nível</th><th class="num">Sua taxa</th><th class="num">Partidas</th><th class="num" title="Taxa de vitória da espécie no meta, puxada para 50% quando há poucas partidas">Meta</th></tr>
+        ${d.time.map((p) => `<tr><td style="white-space:normal">${esc(p.nome)} ${p.shiny ? '<span class="tag shiny">shiny</span>' : ''}<br>${tagsTipo(p.tipos)}</td>
+          <td class="num">${p.nivel != null ? nf(0).format(p.nivel) : '—'}</td><td class="num">${pct(p.taxa)}</td>
+          <td class="num">${p.partidas != null ? nf(0).format(p.partidas) : '—'}</td><td class="num">${pct(p.meta)}</td></tr>`).join('')
+          || '<tr><td colspan="5" class="vazio">Sem partidas recentes.</td></tr>'}
+      </table></div></div>`;
+
+  const ameacas = `
+    <div class="caixa"><h3>Para quem você mais perde</h3>
+      <div class="tabela-wrap" style="max-height:none"><table class="tabela">
+        <tr><th>Adversário</th><th class="num" title="Derrotas contra ele na temporada">Derrotas</th><th class="num">Sua taxa</th><th class="num" title="Derrotas recentes em que ele estava no time do outro">Recentes</th><th>Do seu time, sofre</th><th>Resiste</th></tr>
+        ${d.ameacas.map((a) => `<tr><td style="white-space:normal">${esc(a.nome)}<br>${tagsTipo(a.tipos)}</td>
+          <td class="num">${nf(0).format(a.derrotas)}${a.partidas ? ` <span class="tag">${nf(0).format(a.partidas)}</span>` : ''}</td>
+          <td class="num">${pct(a.taxa)}</td><td class="num">${a.derrotas_recentes || '—'}</td>
+          <td style="white-space:normal">${a.sofrem.length ? esc(a.sofrem.join(', ')) : '<span class="aviso">ninguém</span>'}</td>
+          <td style="white-space:normal">${a.resistem.length ? esc(a.resistem.join(', ')) : '<span class="aviso">ninguém</span>'}</td></tr>`).join('')
+          || '<tr><td colspan="6" class="vazio">Ainda sem derrotas suficientes para apontar um padrão.</td></tr>'}
+      </table></div>
+      <p class="aviso">Sofre / resiste: pelos golpes do mesmo tipo do adversário (tabela de tipos do jogo).</p></div>`;
+
+  const tiposHtml = `
+    <div class="caixa"><h3>Tipos que te castigam</h3>
+      <p>${d.tipos_castigam.map((x) => `<span class="tipo-tag">${esc(x.nome)}</span> ${x.parte}%`).join(' &nbsp; ') || '—'}</p>
+      <h3 style="margin-top:10px">Buracos do time</h3>
+      <p>${d.buracos.filter((b) => b.fracos >= 2).map((b) => `<span class="tipo-tag">${esc(b.nome)}</span> ${b.fracos} sofrem, ${b.resistem} resistem`).join('<br>')
+        || 'Nenhum tipo pega 2 ou mais do seu time.'}</p></div>`;
+
+  const soLoja = $('#pvp-soloja')?.checked ?? !!d.orcamento;
+  const sugs = d.sugestoes.filter((s) => !soLoja || !d.orcamento || s.mais_forte);
+  const anuncio = (a) => (a ? `${htmlPreco(a.preco, m)} <span class="aviso">Nv ${nf(0).format(a.nivel)} · P${a.potencia ?? '?'} · ${nf(0).format(a.poder || 0)} de poder${a.shiny ? ' · shiny' : ''}</span>` : '');
+  const sugestoes = `
+    <div class="caixa"><h3>Quem comprar para o seu time</h3>
+      ${d.orcamento ? `<label class="check"><input type="checkbox" id="pvp-soloja" ${soLoja ? 'checked' : ''}> só o que tem anúncio até ${fmtNum(d.orcamento, m)} ${m === 'gems' ? 'gemas' : 'coins'}</label>` : '<p class="aviso">Ponha um orçamento para ver os anúncios da loja de cada sugestão.</p>'}
+      <div class="tabela-wrap" style="max-height:none"><table class="tabela">
+        <tr><th>#</th><th>Pokémon</th><th>Por quê</th><th class="num">Meta</th>${d.orcamento ? '<th>Na loja: o mais forte</th><th>O mais barato</th>' : ''}</tr>
+        ${sugs.map((s, i) => {
+          const porque = [];
+          if (s.respostas.length) porque.push('ganha de ' + s.respostas.map((v) => `${esc(v.nome)} (${pct(v.taxa)} em ${nf(0).format(v.partidas)})`).join(', '));
+          if (s.resiste_a.length) porque.push('resiste a ' + esc(s.resiste_a.join(', ')));
+          if (s.tampa.length) porque.push('tapa o buraco de ' + esc(s.tampa.join(', ')));
+          if (s.sofre_de.length) porque.push('<span class="desce">cuidado: sofre de ' + esc(s.sofre_de.join(', ')) + '</span>');
+          const fora = d.orcamento && !s.mais_forte
+            ? `<td colspan="2" class="aviso" style="white-space:normal">${s.anuncios_fora ? `nada até o orçamento (${nf(0).format(s.anuncios_fora)} anúncios, a partir de ${fmtNum(s.mais_barato_fora, m)})` : 'sem anúncio na loja'}</td>` : '';
+          return `<tr><td>${i + 1}</td><td style="white-space:normal">${esc(s.nome)}<br>${tagsTipo(s.tipos)}</td>
+            <td style="white-space:normal;min-width:260px">${porque.join('; ') || 'forte no meta do rank'}</td>
+            <td class="num">${s.meta_taxa != null ? `${pct(s.meta_taxa)} <span class="tag">${nf(0).format(s.meta_partidas)}</span>` : '<span class="aviso">pouco usado</span>'}</td>
+            ${d.orcamento ? (fora || `<td style="white-space:normal">${anuncio(s.mais_forte)}</td><td style="white-space:normal">${s.mais_barato && s.mais_barato.id !== s.mais_forte.id ? anuncio(s.mais_barato) : '<span class="aviso">o mesmo</span>'}${s.anuncios > 1 ? ` <span class="tag">${s.anuncios} anúncios</span>` : ''}</td>`) : ''}</tr>`;
+        }).join('') || `<tr><td colspan="6" class="vazio">${d.orcamento ? 'Nenhuma sugestão tem anúncio até esse orçamento. Desmarque o filtro para ver todas.' : 'Sem sugestões.'}</td></tr>`}
+      </table></div>
+      <p class="aviso">A ordem soma três coisas: quanto a espécie ganha das suas ameaças no PvP inteiro (com pelo menos 20 confrontos), a taxa dela no meta do rank e o encaixe de tipos. A loja é lida a cada 3 h; confira o anúncio no jogo antes de comprar.</p></div>`;
+
+  const mt = d.meta || {};
+  const linhaMeta = (x) => `<tr><td style="white-space:normal">${esc(x.nome)}<br>${tagsTipo(x.tipos)}</td><td class="num">${nf(0).format(x.partidas)}</td><td class="num">${pct(x.taxa)}</td></tr>`;
+  const meta = `
+    <div class="duas-col">
+      <div class="caixa"><h3>Meta: mais usados (${esc(NOME_FAIXA[mt.faixa] || mt.faixa || '')})</h3>
+        <table class="tabela"><tr><th>Pokémon</th><th class="num">Partidas</th><th class="num">Vitórias</th></tr>${(mt.mais_usados || []).map(linhaMeta).join('')}</table></div>
+      <div class="caixa"><h3>Meta: melhor taxa (500+ partidas)</h3>
+        <table class="tabela"><tr><th>Pokémon</th><th class="num">Partidas</th><th class="num">Vitórias</th></tr>${(mt.melhor_taxa || []).map(linhaMeta).join('')}</table></div>
+    </div>
+    <div class="caixa" style="margin-top:10px"><h3>Times do topo do ranking</h3>
+      ${(mt.repetidos_topo || []).length ? `<p>Mais repetidos: ${mt.repetidos_topo.map(([n, c]) => `${esc(n)} <span class="tag">${c}</span>`).join(' ')}</p>` : ''}
+      <div class="tabela-wrap" style="max-height:none"><table class="tabela">
+        <tr><th>#</th><th>Treinador</th><th class="num">PR</th><th class="num">Vitórias</th><th>Time (últimas 5 partidas)</th></tr>
+        ${(mt.times_topo || []).map((j) => `<tr><td>${j.posicao}</td><td>${esc(j.nick)}</td><td class="num">${nf(0).format(j.pontos)}</td><td class="num">${pct(j.taxa)}</td>
+          <td style="white-space:normal">${esc(j.time.map((x) => x.nome).join(', '))}</td></tr>`).join('') || '<tr><td colspan="5" class="vazio">Sem dados do topo agora.</td></tr>'}
+      </table></div></div>`;
+
+  $('#pvp-corpo').innerHTML = tiles + `<div class="duas-col">${timeHtml}${tiposHtml}</div>` + `<div style="margin-top:10px">${ameacas}</div>`
+    + `<div style="margin-top:10px">${sugestoes}</div>` + `<div style="margin-top:10px">${meta}</div>`;
+}
+
+function ligarPvp() {
+  $('#pvp-nick').value = lerLocal('pvp_nick');
+  $('#pvp-form').addEventListener('submit', analisarPvp);
+  $('#pvp-corpo').addEventListener('change', (e) => { if (e.target.id === 'pvp-soloja') desenharPvp(); });
+}
+
 // ------------------------------------------------------------------ pokémon (Fase 4)
 const TIPOS_PK = { NORMAL: 'Normal', FIRE: 'Fogo', WATER: 'Água', GRASS: 'Planta', ELECTRIC: 'Elétrico', ICE: 'Gelo',
   FIGHTING: 'Lutador', POISON: 'Veneno', GROUND: 'Terra', FLYING: 'Voador', PSYCHIC: 'Psíquico', BUG: 'Inseto',
@@ -844,6 +964,7 @@ const OBJETIVOS_PK = {
   barganha: 'o maior desconto vs preço justo',
   custo: 'mais poder por gema/coin',
   nota: 'a maior nota',
+  pvp: 'melhor para PvP (meta do rank + contra quem você perde)',
 };
 estado.pksub = 'buscar';
 estado.pkdias = 7;
@@ -854,6 +975,7 @@ function mostrarSubPk(sub) {
   $$('.pk-painel').forEach((p) => p.classList.toggle('hidden', p.id !== 'pk-' + sub));
   if (sub === 'padroes') carregarPadroesPk();
   if (sub === 'vendas') carregarPokemon();
+  if (sub === 'pvp' && !estado.pvp && $('#pvp-nick').value.trim()) analisarPvp();
 }
 
 const tagsTipo = (tipos) => (tipos || []).map((t) => `<span class="tipo-tag">${esc(TIPOS_PK[t] || t)}</span>`).join('');
@@ -866,6 +988,8 @@ async function buscarPk(e) {
     orcamento: $('#pkb-orc').value, moeda, objetivo: $('#pkb-obj').value, especie: $('#pkb-esp').value.trim(),
     tipo: $('#pkb-tipo').value, pmin: $('#pkb-pmin').value, nivel: $('#pkb-nivel').value, nota: $('#pkb-nota').value,
     shiny: $('#pkb-shiny').checked ? 1 : '',
+    // Objetivo PvP: o meta do high elo e, se o nick já foi preenchido na aba PvP, as suas ameaças.
+    pvp_nick: $('#pkb-obj').value === 'pvp' ? lerLocal('pvp_nick') : '', pvp_faixa: 'alto',
   });
   $('#pkb-sub').textContent = d.varredura_ms
     ? `loja lida às ${fDiaHora.format(d.varredura_ms)} · ${nf(0).format(d.anuncios_na_loja)} anúncios · ${nf(0).format(d.total)} cabem no orçamento`
@@ -877,7 +1001,7 @@ async function buscarPk(e) {
       <th class="num">Lucro revendendo</th><th>Vendedor</th></tr>
     ${d.itens.map((x, i) => `<tr title="IVs: ${Object.entries(x.ivs).map(([k, v]) => k + ' ' + v).join(' · ')}${x.faixa ? ` | vendas parecidas entre ${fmtNum(x.faixa[0], m)} e ${fmtNum(x.faixa[1], m)}` : ''}">
       <td>${i + 1}</td>
-      <td style="white-space:normal">${esc(x.especie)} ${x.shiny ? '<span class="tag shiny">shiny</span>' : ''}${x.tm ? ' <span class="tag">TM</span>' : ''}<br>${tagsTipo(x.tipos)}</td>
+      <td style="white-space:normal">${esc(x.especie)} ${x.shiny ? '<span class="tag shiny">shiny</span>' : ''}${x.tm ? ' <span class="tag">TM</span>' : ''}${x.nota_pvp != null ? ` <span class="tag" title="Nota de PvP da espécie (0 a 1): meta do high elo e as suas ameaças">PvP ${nf(2).format(x.nota_pvp)}</span>` : ''}<br>${tagsTipo(x.tipos)}</td>
       <td class="num">${nf(0).format(x.nivel ?? 0)}</td><td class="num">${x.potencia ?? '—'}</td><td class="num">${x.iv ?? '—'}</td>
       <td class="num">${x.qualidade != null ? nf(3).format(x.qualidade) : '—'}</td><td class="num">${x.nota != null ? nf(3).format(x.nota) : '—'}</td>
       <td class="num">${nf(0).format(x.poder ?? 0)}</td>
@@ -946,6 +1070,7 @@ function ligarPokemon() {
   $('#pkb-obj').innerHTML = Object.entries(OBJETIVOS_PK).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
   $('#pkb-tipo').innerHTML = '<option value="">qualquer</option>' + Object.entries(TIPOS_PK).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
   $('#pkb-form').addEventListener('submit', buscarPk);
+  ligarPvp();
   $$('[data-pksub]').forEach((b) => b.addEventListener('click', () => mostrarSubPk(b.dataset.pksub)));
   $$('[data-pkdias]').forEach((b) => b.addEventListener('click', () => {
     estado.pkdias = +b.dataset.pkdias;

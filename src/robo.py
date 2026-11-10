@@ -23,6 +23,7 @@ import asyncio
 import json
 import os
 import sys
+import threading
 import time
 import urllib.request
 import uuid
@@ -36,6 +37,7 @@ import coletor  # noqa: E402
 import importer  # noqa: E402
 import lojapk  # noqa: E402
 import notificar  # noqa: E402
+import pvp  # noqa: E402
 import sinais  # noqa: E402
 
 MAX_ALERTAS_SEPARADOS = 5   # acima disso, o resto vai junto numa mensagem só
@@ -58,6 +60,7 @@ ESPERA_SESSAO_TOMADA_S = 30 * 60
 RECONEXAO_MIN_S, RECONEXAO_MAX_S = 60, 10 * 60   # queda de conexão: 1 min, dobrando até 10 min
 SESSAO_ESTAVEL_S = 10 * 60                        # conectado por mais que isso zera a espera
 PODAR_A_CADA_MS = 60 * 60_000
+PVP_META_A_CADA_MS = 6 * 60 * 60_000   # pré-carga do meta do PvP (Tracker público, sem login)
 
 RECUSAS_FATAIS = {
     "auth.contaBanida": "a conta coletora foi banida",
@@ -300,6 +303,21 @@ def tarefas_locais(con) -> None:
         except Exception as e:
             log(f"poda da vitrine falhou: {e!r}")
         coletor.put(con, vitrine_poda_em=t)
+    if t - coletor.get(con, "pvp_meta_em") >= PVP_META_A_CADA_MS:
+        coletor.put(con, pvp_meta_em=t)
+        threading.Thread(target=_precarregar_pvp, name="pvp-meta", daemon=True).start()
+
+
+def _precarregar_pvp() -> None:
+    """Em segundo plano (são ~14 pedidos com 1,5 s entre eles): não segura a vitrine de minuto em minuto."""
+    con = importer.connect()
+    try:
+        pvp.atualizar_meta(con)
+        log("PvP: meta e times do topo atualizados (Tracker do jogo)")
+    except Exception as e:
+        log(f"PvP: pré-carga do meta falhou: {e!r}")
+    finally:
+        con.close()
 
 
 async def sessao(cfg: dict, uma_vez: bool) -> None:

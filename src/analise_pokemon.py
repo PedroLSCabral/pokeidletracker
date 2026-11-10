@@ -37,6 +37,7 @@ OBJETIVOS = {
     "barganha": "o maior desconto contra o preço justo",
     "custo": "mais poder por cada gema/coin gasta",
     "nota": "a maior nota",
+    "pvp": "melhor para PvP: espécie forte no meta do rank (e contra quem você perde, com nick) + poder",
 }
 
 # Faixas usadas pelo modelo (as mesmas da aba Padrões).
@@ -165,7 +166,7 @@ class Comparaveis:
 
 def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibrado", especie: str = "",
            tipo: str = "", shiny: bool = False, potencia_min: int = 0, nivel_min: int = 0, nota_min: float = 0,
-           limite: int = 60) -> dict:
+           limite: int = 60, pesos_pvp: dict[int, float] | None = None) -> dict:
     lojapk.preparar(con)
     filtro = ["ativo = 1", "moeda = ?", "preco <= ?"]
     args: list = [moeda, orcamento]
@@ -193,7 +194,7 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
         j = comps.preco_justo(r["especie"], r["shiny"], moeda, r["nivel"], r["nota"], r["potencia"])
         preco = r["preco"] or 0
         item = {
-            "id": r["id"], "especie": r["especie"], "nivel": r["nivel"], "shiny": bool(r["shiny"]), "nota": r["nota"],
+            "id": r["id"], "species_id": r["species_id"], "especie": r["especie"], "nivel": r["nivel"], "shiny": bool(r["shiny"]), "nota": r["nota"],
             "poder": r["poder"], "iv": r["iv_total"], "ivs": json.loads(r["ivs"] or "{}"), "qualidade": r["qualidade"],
             "potencia": r["potencia"], "tipos": json.loads(r["tipos"] or "[]"), "refino": r["refino"],
             "tm": bool(r["tm_elemental"]) or bool(r["tm_aoe"]), "preco": preco, "moeda": moeda,
@@ -224,6 +225,13 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
         res.sort(key=lambda x: -x["poder_por_preco"])
     elif objetivo == "nota":
         res.sort(key=lambda x: (-(x["nota"] or 0), x["preco"]))
+    elif objetivo == "pvp":
+        # A espécie pesa mais que o indivíduo: um P5 de uma espécie fraca no PvP perde para um P3 do meta.
+        p_poder = pct("poder")
+        for x in res:
+            x["nota_pvp"] = round((pesos_pvp or {}).get(x["species_id"], 0.0), 3)
+            x["pontos"] = round(0.6 * x["nota_pvp"] + 0.4 * p_poder(x["poder"]), 3)
+        res.sort(key=lambda x: -x["pontos"])
     else:  # equilibrado
         p_poder, p_desc = pct("poder"), pct("desconto")
         for x in res:
