@@ -16,9 +16,11 @@ import os
 import subprocess
 import urllib.parse
 import urllib.request
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 
-CONFIG = Path(__file__).resolve().parent.parent / "config.local.json"
+import caminhos
+
+CONFIG = caminhos.CONFIG
 USER_AGENT = "pokeidletracker-alertas/1.0"
 
 

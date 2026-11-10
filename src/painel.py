@@ -18,16 +18,14 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import analise_pokemon  # noqa: E402
-import coletor  # noqa: E402
-import importer  # noqa: E402
+import caminhos  # noqa: E402
 import notificar  # noqa: E402
-import pvp  # noqa: E402
-import sinais  # noqa: E402
-import venda  # noqa: E402
+from analise import pokemon as analise_pokemon  # noqa: E402
+from analise import pvp, sinais, venda  # noqa: E402
+from coleta import coletor, importer  # noqa: E402
 
 HOST, PORT = "127.0.0.1", 8770
-WEB = Path(__file__).resolve().parent / "painel"
+WEB = caminhos.WEB
 
 TAXA_ITEM = 0.15
 USD_POR_GEMA = 0.009          # recompra (saque) oficial
@@ -417,7 +415,7 @@ def api_status(con) -> dict:
     st["vendas_com_ms"] = con.execute("SELECT COUNT(*) FROM trades WHERE ts_ms IS NOT NULL").fetchone()[0]
     st["buracos_lista"] = [{"antes_de": r["oldest_ts"], "arquivo": r["file"]} for r in con.execute(
         "SELECT oldest_ts, file FROM imports WHERE gap_before = 1 ORDER BY id DESC LIMIT 5")]
-    log = importer.DATA / "robo.log"
+    log = caminhos.LOG_ROBO
     st["robo_log"] = log.read_text(encoding="utf-8", errors="replace").splitlines()[-6:] if log.exists() else []
     return st
 

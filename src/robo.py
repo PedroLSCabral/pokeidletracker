@@ -33,19 +33,17 @@ from pathlib import Path
 import websockets
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import coletor  # noqa: E402
-import importer  # noqa: E402
-import lojapk  # noqa: E402
+import caminhos  # noqa: E402
 import notificar  # noqa: E402
-import pvp  # noqa: E402
-import sinais  # noqa: E402
+from analise import pvp, sinais  # noqa: E402
+from coleta import coletor, importer, lojapk  # noqa: E402
 
 MAX_ALERTAS_SEPARADOS = 5   # acima disso, o resto vai junto numa mensagem só
 
-ROOT = Path(__file__).resolve().parent.parent
-CONFIG = ROOT / "config.local.json"
-LOG = importer.DATA / "robo.log"
-AGORA = importer.DATA / "robo_agora.json"
+ROOT = caminhos.RAIZ
+CONFIG = caminhos.CONFIG
+LOG = caminhos.LOG_ROBO
+AGORA = caminhos.AGORA_ROBO
 
 URL_JOGO = os.environ.get("POKEIDLE_WS", "wss://pokeidle.io")
 URL_ITENS = os.environ.get("POKEIDLE_ITENS", "https://pokeidle.io/assets/items.json")

@@ -22,8 +22,10 @@ import time
 import webbrowser
 from pathlib import Path
 
-RAIZ = Path(__file__).resolve().parent.parent
-DADOS = RAIZ / "data"
+import caminhos  # noqa: E402
+
+RAIZ = caminhos.RAIZ
+DADOS = caminhos.DADOS
 URL_PAINEL = "http://127.0.0.1:8770"
 ATALHO = Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup/PokeIdle Tracker.lnk"
 SEM_JANELA = getattr(subprocess, "CREATE_NO_WINDOW", 0)

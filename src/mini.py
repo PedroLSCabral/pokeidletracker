@@ -20,18 +20,18 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import coletor  # noqa: E402
-import lojapk  # noqa: E402
+import caminhos  # noqa: E402
+from coleta import coletor, lojapk  # noqa: E402
 
-RAIZ = Path(__file__).resolve().parent.parent
-DADOS = RAIZ / "data"
-AGORA = DADOS / "robo_agora.json"
-LOG = DADOS / "robo.log"
-BANCO = DADOS / "market.db"
+RAIZ = caminhos.RAIZ
+DADOS = caminhos.DADOS
+AGORA = caminhos.AGORA_ROBO
+LOG = caminhos.LOG_ROBO
+BANCO = caminhos.BANCO
 URL_PAINEL = "http://127.0.0.1:8770"
 TITULO = "PokeIdle Tracker - status"
 
-# mesmas cores do painel (src/painel/app.css)
+# mesmas cores do painel (src/web/app.css)
 MADEIRA, MADEIRA_CLARO, MADEIRA_ESCURO = "#b5654a", "#e3977a", "#6e3424"
 LINHA, LINHA_2, BORDA, GRADE = "#2b1d28", "#342431", "#170e15", "#3d2a37"
 TINTA, TINTA_2, TINTA_3, CREME = "#f3e9f1", "#c9b6c5", "#8f7a8b", "#fff1d6"

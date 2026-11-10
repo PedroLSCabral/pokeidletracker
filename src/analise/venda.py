@@ -19,8 +19,8 @@ import time
 from collections import defaultdict
 from datetime import datetime
 
-import importer
-from sinais import _ms, _sem_outliers
+from analise.sinais import _ms, _sem_outliers
+from coleta import importer
 
 TAXA = 0.15
 USD_POR_GEMA = 0.009

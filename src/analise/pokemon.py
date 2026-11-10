@@ -21,8 +21,7 @@ import time
 from collections import Counter, defaultdict
 from datetime import datetime
 
-import importer
-import lojapk
+from coleta import importer, lojapk
 
 DIA = 86_400_000
 JANELA_COMPS_DIAS = 14

@@ -1,8 +1,8 @@
 """Importa exportações do mercado do PokeIdle (CSV) para um banco SQLite.
 
 Uso:
-    python src/importer.py                # importa tudo que estiver em data/inbox/
-    python src/importer.py arquivo.csv    # importa arquivos específicos
+    python src/coleta/importer.py                # importa tudo que estiver em data/inbox/
+    python src/coleta/importer.py arquivo.csv    # importa arquivos específicos
 
 Deduplicação: o CSV não tem ID de transação e a data só vai até o minuto, e
 linhas idênticas podem ser vendas diferentes de verdade. Por isso, a cada
@@ -23,15 +23,20 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+if __package__ in (None, ""):  # rodado direto (python src/coleta/x.py): põe src/ no caminho dos imports
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import caminhos  # noqa: E402
+
 # Horário de Brasília fixo (sem horário de verão desde 2019). O CSV do jogo vem nesse fuso, e o
 # sistema pode estar em outro fuso: sem isto, os minutos não bateriam na deduplicação.
 BRT = timezone(timedelta(hours=-3))
 
-ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "data"
+ROOT = caminhos.RAIZ
+DATA = caminhos.DADOS
 INBOX = DATA / "inbox"
 PROCESSED = DATA / "processed"
-DB_PATH = DATA / "market.db"
+DB_PATH = caminhos.BANCO
 
 CURRENCY = {"Gemas": "gems", "Coins": "coins"}
 

@@ -17,7 +17,7 @@ import time
 from collections import defaultdict
 from datetime import datetime
 
-import importer
+from coleta import importer
 
 TAXA = 0.15
 HORA = 3600_000

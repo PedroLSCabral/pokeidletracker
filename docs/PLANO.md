@@ -2,6 +2,8 @@
 
 > Projeto pessoal e não oficial, sem relação com a equipe do pokeidle.io. Este arquivo é o diário do projeto: o plano original, o que foi descoberto sobre o jogo e as decisões tomadas, na ordem em que aconteceram.
 
+> Os caminhos de arquivo citados aqui são os da época de cada entrada. Em 10/11 as pastas foram reorganizadas (`src/coleta/`, `src/analise/`, `src/web/`, `legado/`, `docs/`); a estrutura atual e o papel de cada módulo estão em [ARQUITETURA.md](ARQUITETURA.md).
+
 Painel de análise de preços do mercado RMT do Poké Idle.io (preços em gemas), montado a partir do histórico de compras que o próprio jogo exporta.
 
 ## Objetivo

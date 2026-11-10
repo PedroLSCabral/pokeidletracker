@@ -1,7 +1,7 @@
 """Servidor local que recebe os dados do userscript (aba do jogo) e grava no banco.
 
 Uso:
-    python src/coletor.py            # escuta em http://127.0.0.1:8765
+    python src/coleta/coletor.py     # escuta em http://127.0.0.1:8765
 
 Rotas:
     GET  /                          status em HTML
@@ -28,11 +28,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import importer  # noqa: E402
+if __package__ in (None, ""):  # rodado direto (python src/coleta/x.py): põe src/ no caminho dos imports
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import caminhos  # noqa: E402
+from coleta import importer  # noqa: E402
 
 HOST, PORT = "127.0.0.1", 8765
-USERSCRIPT = Path(__file__).resolve().parent / "userscript" / "pokeidle-coletor.user.js"
+USERSCRIPT = caminhos.USERSCRIPT
 
 ESPERA_PADRAO_MS = 60 * 60_000   # se o jogo não disser quanto falta
 MARGEM_MS = 30_000               # folga depois do horário liberado
