@@ -10,7 +10,7 @@ Um robô entra no jogo com uma conta só para coleta e grava num banco SQLite lo
 
 Um painel web em pixel art mostra preços, sinais de revenda, alertas e um analisador de Pokémon. O analisador estima o preço justo de cada anúncio e procura o melhor Pokémon para um orçamento. A aba PvP lê o seu histórico no Tracker público do jogo e sugere o que comprar contra quem você mais perde.
 
-O plano completo, as descobertas sobre o jogo e as decisões estão em [PLANO.md](PLANO.md).
+O plano completo, as descobertas sobre o jogo e as decisões estão em [docs/PLANO.md](docs/PLANO.md); o mapa técnico do código, em [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
 
 > **Projeto pessoal e não oficial,** sem relação com a equipe do pokeidle.io. Os Termos de Uso do jogo permitem automação desde que ela não burle limites nem sobrecarregue o servidor; o robô foi feito para ficar dentro disso (veja "Regras que o robô respeita"). Use por sua conta e risco, com uma conta separada, nunca com a sua conta principal.
 
@@ -24,7 +24,7 @@ O plano completo, as descobertas sobre o jogo e as decisões estão em [PLANO.md
    ```bash
    python src/robo.py --configurar
    ```
-   O comando pede o nick e o token, copiados do console do navegador; o passo a passo está no PLANO.md, Fase 2. Eles ficam em `config.local.json`, que **nunca** vai para o git.
+   O comando pede o nick e o token, copiados do console do navegador; o passo a passo está no [docs/PLANO.md](docs/PLANO.md), Fase 2. Eles ficam em `config.local.json`, que **nunca** vai para o git.
 3. **Ligue tudo com dois cliques em `iniciar.bat`.** O robô e o painel rodam escondidos, e aparece uma pokébola na bandeja, perto do relógio:
    - o clique esquerdo abre uma janelinha de status (o que o robô está fazendo e quando é a próxima tarefa);
    - o clique direito abre o menu (painel, log, reiniciar, ligar com o Windows, sair).
@@ -36,23 +36,23 @@ Para ligar junto com o Windows, marque a opção no menu da pokébola ou rode `p
 
 ## Estrutura
 
-| Arquivo | O que faz |
+| Pasta / arquivo | O que tem |
 |---|---|
-| `src/robo.py` | Robô coletor: socket do jogo, export, vitrine, loja de Pokémon e alertas |
 | `src/bandeja.py` | Ícone na bandeja: mantém o robô e o painel rodando escondidos e os religa se caírem |
+| `src/robo.py` | Robô coletor: fica conectado ao jogo e lê a vitrine, o export e a loja de Pokémon |
+| `src/painel.py` | Servidor do painel (API JSON + a página de `src/web/`) |
 | `src/mini.py` | Janelinha de status, que abre pelo ícone |
-| `src/painel.py` + `src/painel/` | Painel web (API em Python e página em HTML/CSS/JS, sem dependências). Os ícones vêm direto do site do jogo |
-| `src/importer.py` | Banco SQLite, importação do CSV/JSON do export, deduplicação |
-| `src/coletor.py` | Gravação compartilhada (vendas, vitrine, itens) e o servidor do antigo userscript |
-| `src/lojapk.py` | Tabelas e gravação dos anúncios da loja de Pokémon |
-| `src/sinais.py` | Fase 3: sinais de revenda, regras e histórico de alertas |
-| `src/notificar.py` | Avisos pelo Windows, Discord ou Telegram |
-| `src/analise_pokemon.py` | Fase 4: preço justo, busca por orçamento e padrões de mercado |
-| `src/pvp.py` | Aba PvP: seu histórico no Tracker público do jogo, para quem você perde, meta do rank e quem comprar |
-| `src/venda.py` | Botão "vender": em qual moeda, por quanto e quando vender um item que você dropou |
-| `src/userscript/`, `extras/` | Primeira tentativa de coleta, por userscript (não funcionou no Idle Deck) |
+| `src/coleta/` | O que grava no banco: esquema e importação (`importer`), vendas/vitrine/agenda (`coletor`), loja de Pokémon (`lojapk`) |
+| `src/analise/` | O que calcula: revenda e alertas (`sinais`), botão vender (`venda`), Pokémon (`pokemon`), PvP (`pvp`) |
+| `src/web/` | A página do painel em pixel art (HTML, CSS e JS sem dependências; ícones carregados do site do jogo) |
+| `src/caminhos.py`, `src/notificar.py` | Pastas do projeto; avisos pelo Windows, Discord ou Telegram |
+| `testes/` | Robô contra um jogo falso, sem tocar no pokeidle.io |
+| `legado/` | Primeira tentativa de coleta, por userscript (não funcionou no Idle Deck) |
+| `docs/` | [`ARQUITETURA.md`](docs/ARQUITETURA.md) (o mapa técnico) e [`PLANO.md`](docs/PLANO.md) (o diário do projeto) |
 
-Os dados ficam em `data/`, também fora do git: `market.db`, `robo.log` e `robo_agora.json`.
+Os dados ficam em `data/`, também fora do git: `market.db`, os logs e `robo_agora.json`.
+
+**Vai mexer no código?** Comece pelo [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md) e pelo [`CLAUDE.md`](CLAUDE.md).
 
 ## Regras que o robô respeita
 
