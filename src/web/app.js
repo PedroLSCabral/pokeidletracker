@@ -183,7 +183,7 @@ function desenharDetalhe(d) {
     <div class="tiles">
       <div class="tile"><div class="rot">Mediana</div><div class="val">${htmlPreco(s.mediana, moeda)}</div><div class="det">p10 ${fmtNum(s.p10, moeda)} · p90 ${fmtNum(s.p90, moeda)}</div></div>
       <div class="tile"><div class="rot">Média (por unidade)</div><div class="val">${htmlPreco(s.media, moeda)}</div><div class="det">${moeda === 'gems' && s.media ? usd(s.media) + ' bruto' : '&nbsp;'}</div></div>
-      <div class="tile"><div class="rot">Mín · Máx</div><div class="val" style="font-size:22px">${fmtNum(s.min, moeda)} · ${fmtNum(s.max, moeda)}</div><div class="det">${s.suspeitas ? `${s.suspeitas} venda(s) suspeita(s) fora da conta` : 'nenhuma venda suspeita'}</div></div>
+      <div class="tile"><div class="rot">Mín · Máx</div><div class="val" style="font-size:16px">${fmtNum(s.min, moeda)} · ${fmtNum(s.max, moeda)}</div><div class="det">${s.suspeitas ? `${s.suspeitas} venda(s) suspeita(s) fora da conta` : 'nenhuma venda suspeita'}</div></div>
       <div class="tile"><div class="rot">Vendas · unidades</div><div class="val">${nf(0).format(s.vendas)} · ${nf(0).format(s.unidades)}</div><div class="det">desde ${desde}</div></div>
       <div class="tile"><div class="rot">Menor anúncio agora</div><div class="val">${htmlPreco(v.min, moeda)}</div><div class="det">${v.anuncios != null ? `${nf(0).format(v.anuncios)} anúncios · ${nf(0).format(v.unidades)} un.` : 'sem dado da vitrine'}</div></div>
       <div class="tile"><div class="rot">Média 7d (jogo)</div><div class="val">${htmlPreco(v.media7, moeda)}</div><div class="det">calculada pelo próprio jogo</div></div>
@@ -452,7 +452,7 @@ async function carregarMontagem() {
           <div class="tabela-wrap"><table class="tabela">
             <tr><th>Raridade</th><th class="num">Chance</th><th class="num">Vendas 7d</th><th class="num">Média 7d jogo</th><th class="num">Menor anúncio</th><th class="num">Usado</th></tr>
             ${mt.linhas.map((l, i) => `<tr>
-              <td><span class="linha-item ${classeRaridade(l.nome)}" style="display:inline;padding:0 6px;border-top:0;border-right:0;border-bottom:0;box-shadow:none;background:none"><span class="ico" style="margin-right:6px">${img(l.icone)}</span>${l.raridade}</span></td>
+              <td><span class="rar-tag ${classeRaridade(l.nome)}"><span class="ico">${img(l.icone)}</span>${l.raridade}</span></td>
               <td class="num">${nf(3).format(l.chance * 100)}%</td>
               <td class="num">${l.mediana != null ? `${fmtNum(l.mediana, 'gems')} <span class="tag">${l.vendas}</span>` : '—'}</td>
               <td class="num">${fmtNum(l.media7_jogo, 'gems')}</td>

@@ -18,7 +18,7 @@ O pokeidle.io é um jogo idle de Pokémon com mercado de dinheiro real: as **gem
 1. **coleta** o mercado com uma conta separada (o robô): as vendas, a vitrine de itens e a loja de Pokémon;
 2. **guarda** tudo num SQLite local (`data/market.db`);
 3. **analisa** esses dados: preços, revenda, alertas, preço justo de Pokémon, quando e por quanto vender e PvP;
-4. **mostra** num painel web local em pixel art (`http://127.0.0.1:8770`) e avisa por Windows, Discord ou Telegram.
+4. **mostra** num painel web local com o visual do jogo (`http://127.0.0.1:8770`) e avisa por Windows, Discord ou Telegram.
 
 ```
                        ┌─────────────────────── PC (Windows) ────────────────────────┐
@@ -68,7 +68,7 @@ pokeidletracker/
 │  └─ web/                  a página do painel
 │     ├─ index.html         estrutura das abas e janelas
 │     ├─ app.js             toda a lógica da página (uma seção por aba)
-│     └─ app.css            estilo pixel art (tokens de cor em :root)
+│     └─ app.css            visual do jogo (tokens de cor e fontes em :root)
 ├─ testes/
 │  └─ teste_robo_sessao.py  robô contra um jogo falso (sessão, queda, vitrine, poda)
 ├─ legado/                  primeira tentativa de coleta: userscript no navegador (não roda no Idle Deck)
@@ -399,8 +399,13 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   - todo texto que vem do servidor passa por `esc()` antes de entrar no HTML;
   - os eventos usam delegação no contêiner (por exemplo, `#lista`, `#venda-corpo`), porque o conteúdo é redesenhado;
   - o `localStorage` só guarda conveniências e fica sempre dentro de `try/catch`.
-- **`app.css`:** os tokens de cor ficam em `:root` (`--madeira*`, `--linha*`, `--tinta*`, `--gema`, `--ouro`, `--serie-*`, `--sobe`, `--desce`, as raridades). As fontes são `VT323` e `Press Start 2P`, do Google Fonts.
-  - **Componentes:** `.janela` (moldura de madeira) com `.janela-titulo` e `.janela-corpo`, `.caixa`, `.tile`/`.tiles`, `.tabela`, `.chip`, `.btn-primario`, `.tag`, `.tipo-tag`, `.var.sobe` e `.var.desce`.
+- **`app.css`:** copia o visual do jogo (as cores saíram do CSS público do pokeidle.io).
+  - **Fontes, só do sistema:** texto corrido em `--f-texto` (Segoe UI); títulos, botões, abas, rótulos e números em `--f-titulo` (Tahoma negrito). Os títulos levam contorno de 4 pontos (`--contorno-*`), como no jogo. Nenhuma fonte é baixada.
+  - **Tokens em `:root`:** `--xadrez-*` (fundo azul), `--mad-*` (madeira), `--rx-*` (roxo), `--vao*` (áreas escuras), `--tinta*`, `--gema`, `--ouro`, `--sobe`, `--desce` e as raridades (`--r-*`). O `app.js` usa `--linha` (fundo dos quadrinhos e do gráfico), `--grade`, `--serie-1`/`--serie-2` e `--tinta*`. As séries foram validadas contra o `--linha`; se mudar um, valide o outro.
+  - **Três peças:** o quadro de madeira (`.janela`, `.topo`), o vão (`.janela-corpo`, `.campo`) e o botão. O botão é de madeira quando apagado e roxo quando ligado (`.ativa`) ou de ação (`.btn-primario`). As abas do topo são o botão grande (moldura de 8 px).
+  - **Molduras com `box-shadow: inset` empilhados:** a primeira sombra fica por cima. O padding de um botão nunca pode ser menor que a moldura (5 px nos pequenos, 8 px nas abas).
+  - **Outros componentes:** `.caixa`, `.tile`/`.tiles`, `.grafico-box`, `.tabela`, `.tag`, `.tipo-tag`, `.var.sobe`/`.var.desce` e o interruptor que substitui todo `input[type=checkbox]`.
+  - **Raridade:** as classes `.r-*` só definem `--rar`. A `.linha-item` desenha a faixa da esquerda com ela, e a `.rar-tag` é a versão em linha (na tabela de montagem).
   - As seções novas vão no fim do arquivo, com um comentário `/* ---------- nome ---------- */`.
 
 ---

@@ -8,7 +8,7 @@ Um robô entra no jogo com uma conta só para coleta e grava num banco SQLite lo
 - a vitrine de itens (menor anúncio e média de 7 dias de cada item), a cada minuto;
 - a loja de Pokémon inteira, a cada 3 horas.
 
-Um painel web em pixel art mostra preços, sinais de revenda, alertas e um analisador de Pokémon. O analisador estima o preço justo de cada anúncio e procura o melhor Pokémon para um orçamento. A aba PvP lê o seu histórico no Tracker público do jogo e sugere o que comprar contra quem você mais perde.
+Um painel web com o visual do jogo mostra preços, sinais de revenda, alertas e um analisador de Pokémon. O analisador estima o preço justo de cada anúncio e procura o melhor Pokémon para um orçamento. A aba PvP lê o seu histórico no Tracker público do jogo e sugere o que comprar contra quem você mais perde.
 
 O plano completo, as descobertas sobre o jogo e as decisões estão em [docs/PLANO.md](docs/PLANO.md); o mapa técnico do código, em [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
 
@@ -44,7 +44,7 @@ Para ligar junto com o Windows, marque a opção no menu da pokébola ou rode `p
 | `src/mini.py` | Janelinha de status, que abre pelo ícone |
 | `src/coleta/` | O que grava no banco: esquema e importação (`importer`), vendas/vitrine/agenda (`coletor`), loja de Pokémon (`lojapk`) |
 | `src/analise/` | O que calcula: revenda e alertas (`sinais`), botão vender (`venda`), Pokémon (`pokemon`), PvP (`pvp`) |
-| `src/web/` | A página do painel em pixel art (HTML, CSS e JS sem dependências; ícones carregados do site do jogo) |
+| `src/web/` | A página do painel com o visual do jogo (HTML, CSS e JS sem dependências; ícones carregados do site do jogo) |
 | `src/caminhos.py`, `src/notificar.py` | Pastas do projeto; avisos pelo Windows, Discord ou Telegram |
 | `testes/` | Robô contra um jogo falso, sem tocar no pokeidle.io |
 | `legado/` | Primeira tentativa de coleta, por userscript (não funcionou no Idle Deck) |
