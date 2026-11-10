@@ -4,11 +4,11 @@
     python src/robo.py                # roda para sempre
     python src/robo.py --uma-vez      # uma rodada só (teste)
 
-A cada rodada: conecta no socket do jogo, faz o `hello`, espera o `welcome`, pede o export
-(quando o jogo libera, 1 por hora) e o retrato da vitrine (a cada 15 min), grava e desconecta.
-A cada 3 h lê também a loja de Pokémon inteira. O que ele está fazendo agora fica em
+Entra uma vez no socket do jogo (`hello` → `welcome`) e fica conectado: lê a vitrine de itens
+a cada minuto, pede o export quando o jogo libera (1 por hora) e, a cada 3 h, lê a loja de Pokémon
+inteira. Ficar conectado evita um login novo a cada minuto. Se a conexão cair, entra de novo
+(espera 1 min, dobrando a cada queda seguida até 10 min). O que ele está fazendo agora fica em
 data/robo_agora.json (a janelinha de status, src/mini.py, lê esse arquivo).
-Entre as rodadas, fica desconectado.
 
 Regras que o robô respeita:
   - 1 export por hora: usa o tempo que o próprio jogo devolve (`esperaMs`/`restaMs`).
@@ -55,6 +55,9 @@ ESPERA_RESPOSTA_S = 30
 CHECAR_NO_MAXIMO_A_CADA_S = 10 * 60
 ESPERA_APOS_ERRO_S = 5 * 60
 ESPERA_SESSAO_TOMADA_S = 30 * 60
+RECONEXAO_MIN_S, RECONEXAO_MAX_S = 60, 10 * 60   # queda de conexão: 1 min, dobrando até 10 min
+SESSAO_ESTAVEL_S = 10 * 60                        # conectado por mais que isso zera a espera
+PODAR_A_CADA_MS = 60 * 60_000
 
 RECUSAS_FATAIS = {
     "auth.contaBanida": "a conta coletora foi banida",
@@ -235,12 +238,72 @@ class Sessao:
             if condicao(m):
                 return m
 
+    def _descartar_antigas(self):
+        """Joga fora o que chegou sem ser pedido (numa sessão longa o jogo pode empurrar atualizações),
+        para a resposta de agora não ser confundida com uma velha. Erros e quedas continuam valendo."""
+        while not self.fila.empty():
+            m = self.fila.get_nowait()
+            if isinstance(m, BaseException):
+                raise m
+
     async def pedir(self, msg: dict, condicao, prazo_s: float = ESPERA_RESPOSTA_S):
+        self._descartar_antigas()
         await self.ws.send(json.dumps(msg))
         return await self.esperar(condicao, prazo_s)
 
 
-async def rodada(cfg: dict, exportar: bool, vitrine: bool, pokemon: bool = False) -> None:
+async def pedir_export(s: Sessao, cfg: dict) -> None:
+    agora(fase="export", detalhe="pedindo o export do mercado")
+    m = await s.pedir({"t": "csv.pedir", "tipo": "mercado", "filtros": {}},
+                      lambda m: m.get("t") == "csv" and m.get("tipo") == "mercado")
+    con = importer.connect()
+    try:
+        if m.get("recusa"):
+            rec = m["recusa"]
+            coletor.receber_recusa(con, {"nick": cfg["nick"], "chave": rec.get("chave"),
+                                         "restaMs": rec.get("restaMs")})
+        elif m.get("ok") and isinstance((m.get("mercado") or {}).get("linhas"), list):
+            mer = m["mercado"]
+            coletor.receber_vendas(con, {"nick": cfg["nick"], "esperaMs": m.get("esperaMs"),
+                                         "cortado": mer.get("cortado"), "linhas": mer["linhas"]})
+        else:
+            coletor.receber_falha(con, {"motivo": "resposta inesperada do export"})
+    finally:
+        con.close()
+
+
+async def ler_vitrine(s: Sessao) -> None:
+    agora(fase="vitrine", detalhe="lendo a vitrine de itens")
+    m = await s.pedir({"t": "market.itens"}, lambda m: m.get("t") == "market" and m.get("aba") == "itens")
+    con = importer.connect()
+    try:
+        coletor.receber_vitrine(con, {"resumo": m.get("resumo"), "medias": m.get("medias")})
+    finally:
+        con.close()
+
+
+def tarefas_locais(con) -> None:
+    """O que não precisa do jogo: nomes dos itens (1 vez por dia) e a poda da vitrine (1 vez por hora)."""
+    _, _, itens, _, _ = proximas_tarefas(con)
+    if itens:
+        try:
+            baixar_itens(con)
+        except Exception as e:  # nomes de itens não são críticos
+            log(f"items.json falhou: {e!r}")
+            coletor.put(con, itens_em=coletor.agora_ms() - coletor.ITENS_A_CADA_MS + 3600_000)
+    t = coletor.agora_ms()
+    if t - coletor.get(con, "vitrine_poda_em") >= PODAR_A_CADA_MS:
+        try:
+            n = coletor.podar_vitrine(con)
+            if n:
+                log(f"vitrine: {n} linhas antigas resumidas (fica 1 retrato a cada 15 min depois de 3 dias)")
+        except Exception as e:
+            log(f"poda da vitrine falhou: {e!r}")
+        coletor.put(con, vitrine_poda_em=t)
+
+
+async def sessao(cfg: dict, uma_vez: bool) -> None:
+    """Entra no jogo e fica: a cada volta faz o que estiver na hora e dorme até a próxima tarefa."""
     async with websockets.connect(
         URL_JOGO, origin=ORIGEM, user_agent_header=USER_AGENT,
         max_size=64 * 2**20, open_timeout=30, ping_interval=None,
@@ -252,35 +315,35 @@ async def rodada(cfg: dict, exportar: bool, vitrine: bool, pokemon: bool = False
             await ws.send(json.dumps({"t": "hello", "nick": cfg["nick"], "token": cfg["token"],
                                       "delta": 1, "dispositivo": cfg["dispositivo"]}))
             await s.esperar(lambda m: m.get("t") == "welcome", ESPERA_WELCOME_S)
-            log("conectado")
-            if exportar:
-                agora(fase="export", detalhe="pedindo o export do mercado")
-                m = await s.pedir({"t": "csv.pedir", "tipo": "mercado", "filtros": {}},
-                                  lambda m: m.get("t") == "csv" and m.get("tipo") == "mercado")
+            log("conectado (fica conectado entre as leituras)")
+            agora(erro=None, conectado_ms=coletor.agora_ms())
+            while True:
                 con = importer.connect()
                 try:
-                    if m.get("recusa"):
-                        rec = m["recusa"]
-                        coletor.receber_recusa(con, {"nick": cfg["nick"], "chave": rec.get("chave"),
-                                                     "restaMs": rec.get("restaMs")})
-                    elif m.get("ok") and isinstance((m.get("mercado") or {}).get("linhas"), list):
-                        mer = m["mercado"]
-                        coletor.receber_vendas(con, {"nick": cfg["nick"], "esperaMs": m.get("esperaMs"),
-                                                     "cortado": mer.get("cortado"), "linhas": mer["linhas"]})
-                    else:
-                        coletor.receber_falha(con, {"motivo": "resposta inesperada do export"})
+                    tarefas_locais(con)
+                    exportar, vitrine, _, pokemon, _ = proximas_tarefas(con)
                 finally:
                     con.close()
-            if vitrine:
-                agora(fase="vitrine", detalhe="lendo a vitrine de itens")
-                m = await s.pedir({"t": "market.itens"}, lambda m: m.get("t") == "market" and m.get("aba") == "itens")
+                if exportar:
+                    await pedir_export(s, cfg)
+                if vitrine:
+                    await ler_vitrine(s)
+                if pokemon:
+                    await varrer_loja_pokemon(s)
+                if exportar or vitrine or pokemon:
+                    agora(fase="alertas", detalhe="conferindo os alertas")
+                    checar_alertas()
+                if uma_vez:
+                    return
                 con = importer.connect()
                 try:
-                    coletor.receber_vitrine(con, {"resumo": m.get("resumo"), "medias": m.get("medias")})
+                    *_, espera = proximas_tarefas(con)
                 finally:
                     con.close()
-            if pokemon:
-                await varrer_loja_pokemon(s)
+                espera = min(max(espera, 1), CHECAR_NO_MAXIMO_A_CADA_S)
+                agora(fase="esperando", detalhe="conectado, esperando a próxima tarefa", loja=None,
+                      acordar_ms=coletor.agora_ms() + espera * 1000)
+                await asyncio.sleep(espera)
         finally:
             pinger.cancel()
             leitor.cancel()
@@ -390,61 +453,40 @@ def checar_alertas() -> None:
 async def rodar(uma_vez: bool) -> None:
     cfg = ler_config()
     log(f"robô ligado com a conta {cfg['nick']} → {URL_JOGO}")
+    reconexao = RECONEXAO_MIN_S
     while True:
-        con = importer.connect()
+        agora(fase="conectando", detalhe="entrando no jogo", loja=None, erro=None, acordar_ms=None)
+        inicio = time.monotonic()
         try:
-            exportar, vitrine, itens, pokemon, espera = proximas_tarefas(con)
-            if itens:
-                try:
-                    baixar_itens(con)
-                except Exception as e:  # nomes de itens não são críticos
-                    log(f"items.json falhou: {e!r}")
-                    coletor.put(con, itens_em=coletor.agora_ms() - coletor.ITENS_A_CADA_MS + 3600_000)
+            await sessao(cfg, uma_vez)
+            return  # só volta sem erro no --uma-vez
+        except Fatal:
+            raise
+        except websockets.ConnectionClosed as e:
+            codigo = e.rcvd.code if e.rcvd else None
+            if codigo == 4001:
+                log("a conta coletora foi aberta em outro lugar (4001); esperando 30 min")
+                espera = ESPERA_SESSAO_TOMADA_S
+                agora(erro="a conta coletora foi aberta em outro lugar")
+            else:
+                if time.monotonic() - inicio > SESSAO_ESTAVEL_S:
+                    reconexao = RECONEXAO_MIN_S
+                espera, reconexao = reconexao, min(reconexao * 2, RECONEXAO_MAX_S)
+                log(f"conexão fechada pelo jogo (código {codigo}); entrando de novo em {espera // 60} min" if espera >= 60
+                    else f"conexão fechada pelo jogo (código {codigo}); entrando de novo em {espera} s")
+                agora(erro=f"o jogo fechou a conexão (código {codigo})")
+        except Exception as e:
+            log(f"sessão falhou: {e!r}; tentando em 5 min")
+            espera = ESPERA_APOS_ERRO_S
+            agora(erro=f"a sessão falhou: {e!r}"[:160])
+        con = importer.connect()
+        try:  # um export pedido e não respondido não fica travado para sempre
+            coletor.put(con, export_trava_ate=coletor.agora_ms() + espera * 1000)
         finally:
             con.close()
-
-        if exportar or vitrine or pokemon:
-            fila = [n for n, f in (("export", exportar), ("vitrine", vitrine), ("loja de Pokémon", pokemon)) if f]
-            agora(fase="conectando", detalhe="entrando no jogo para: " + ", ".join(fila),
-                  loja=None, erro=None, acordar_ms=None)
-            try:
-                await rodada(cfg, exportar, vitrine, pokemon)
-                espera = None
-                agora(fase="alertas", detalhe="conferindo os alertas")
-                checar_alertas()
-            except Fatal:
-                raise
-            except websockets.ConnectionClosed as e:
-                codigo = e.rcvd.code if e.rcvd else None
-                if codigo == 4001:
-                    log("a conta coletora foi aberta em outro lugar (4001); esperando 30 min")
-                    espera = ESPERA_SESSAO_TOMADA_S
-                    agora(erro="a conta coletora foi aberta em outro lugar")
-                else:
-                    log(f"conexão fechada pelo jogo (código {codigo}); tentando em 5 min")
-                    espera = ESPERA_APOS_ERRO_S
-                    agora(erro=f"o jogo fechou a conexão (código {codigo})")
-            except Exception as e:
-                log(f"rodada falhou: {e!r}; tentando em 5 min")
-                espera = ESPERA_APOS_ERRO_S
-                agora(erro=f"a rodada falhou: {e!r}"[:160])
-            if espera is not None:
-                con = importer.connect()
-                try:  # um export pedido e não respondido não fica travado para sempre
-                    coletor.put(con, export_trava_ate=coletor.agora_ms() + espera * 1000)
-                finally:
-                    con.close()
-
         if uma_vez:
             return
-        if espera is None:
-            con = importer.connect()
-            try:
-                *_, espera = proximas_tarefas(con)
-            finally:
-                con.close()
-        espera = min(max(espera, 5), CHECAR_NO_MAXIMO_A_CADA_S)
-        agora(fase="esperando", detalhe="esperando a próxima tarefa", loja=None,
+        agora(fase="esperando", detalhe="desconectado, esperando para entrar de novo", loja=None,
               acordar_ms=coletor.agora_ms() + espera * 1000)
         await asyncio.sleep(espera)
 

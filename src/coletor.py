@@ -37,7 +37,9 @@ USERSCRIPT = Path(__file__).resolve().parent / "userscript" / "pokeidle-coletor.
 ESPERA_PADRAO_MS = 60 * 60_000   # se o jogo não disser quanto falta
 MARGEM_MS = 30_000               # folga depois do horário liberado
 TRAVA_MS = 90_000                # uma aba pediu; as outras esperam a resposta
-VITRINE_A_CADA_MS = 15 * 60_000  # mais frequente para pegar anúncios baratos (oportunidades de revenda)
+VITRINE_A_CADA_MS = 60_000      # a cada minuto: é um pedido leve, e o menor anúncio muda rápido
+VITRINE_DETALHE_MS = 3 * 24 * 60 * 60_000   # retratos de minuto em minuto ficam 3 dias...
+VITRINE_RESUMO_MS = 15 * 60_000             # ...depois sobra um a cada 15 min (o histórico de antes)
 ITENS_A_CADA_MS = 24 * 60 * 60_000
 
 LOCK = threading.Lock()
@@ -132,9 +134,22 @@ def receber_vitrine(con, body: dict) -> dict:
                        g.get("media"), g.get("unidades"), o.get("media"), o.get("unidades")))
     with con:
         con.executemany("INSERT OR REPLACE INTO vitrine VALUES (?,?,?,?,?,?,?,?,?,?,?)", linhas)
+    antes = get(con, "vitrine_em")
     put(con, vitrine_em=t, vitrine_trava_ate=0)
-    log(f"vitrine: {len(linhas)} itens")
+    if t // VITRINE_RESUMO_MS != antes // VITRINE_RESUMO_MS:  # no log, uma linha a cada 15 min basta
+        log(f"vitrine: {len(linhas)} itens")
     return {"ok": True, "itens": len(linhas)}
+
+
+def podar_vitrine(con) -> int:
+    """Retratos com mais de 3 dias ficam só um a cada 15 min (o primeiro de cada faixa).
+    Sem isso, a vitrine de minuto em minuto cresceria ~50 mil linhas por dia para sempre."""
+    corte = agora_ms() - VITRINE_DETALHE_MS
+    with con:
+        n = con.execute(f"""DELETE FROM vitrine WHERE snap_ms < ? AND snap_ms NOT IN (
+                               SELECT MIN(snap_ms) FROM vitrine WHERE snap_ms < ? GROUP BY snap_ms / {VITRINE_RESUMO_MS})""",
+                        (corte, corte)).rowcount
+    return n
 
 
 def receber_itens(con, body: dict) -> dict:

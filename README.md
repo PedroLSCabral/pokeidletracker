@@ -5,7 +5,7 @@ Coleta e análise do mercado do [pokeidle.io](https://pokeidle.io), onde as gema
 Um robô entra no jogo com uma conta só para coleta e grava num banco SQLite local:
 
 - as vendas do mercado (o export de 1 em 1 hora que o próprio jogo oferece);
-- a vitrine de itens, a cada 15 minutos;
+- a vitrine de itens (menor anúncio e média de 7 dias de cada item), a cada minuto;
 - a loja de Pokémon inteira, a cada 3 horas.
 
 Um painel web em pixel art mostra preços, sinais de revenda, alertas e um analisador de Pokémon. O analisador estima o preço justo de cada anúncio e procura o melhor Pokémon para um orçamento.

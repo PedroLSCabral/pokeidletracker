@@ -42,7 +42,7 @@ Depende de como o botão de exportar funciona por baixo dos panos; isso precisa 
   - **barato/caro:** mediana de 24h contra a de 7 dias (só aparece depois de 36h de coleta);
   - **liquidez:** vendas por dia (alta ≥ 20, média ≥ 5, baixa < 5).
 - **Regras de alerta** ficam no banco (`alertas_regras`) e são editadas na aba **Sinais** do painel. Tipos: margem de revenda ≥ X%, menor anúncio ≤ X, mediana 24h ≥ X, variação 7d ≥ X%. Valem para um item ou para qualquer item. Regra inicial: qualquer item, margem ≥ 10%, sem liquidez baixa.
-- **O robô confere as regras depois de cada coleta** (a cada 15 min). O mesmo alerta não se repete por 6h, a menos que fique 5% melhor. Mais de 5 alertas de uma vez viram uma mensagem só. Tudo vai para `alertas_log`, que aparece no painel.
+- **O robô confere as regras depois de cada coleta** (a cada minuto, com a vitrine; eram 15 min até 09/11). O mesmo alerta não se repete por 6h, a menos que fique 5% melhor. Mais de 5 alertas de uma vez viram uma mensagem só. Tudo vai para `alertas_log`, que aparece no painel.
 - **Canais** (`src/notificar.py`), configurados em `config.local.json`, no bloco `"alertas"`:
   - `"windows": true`: notificação nativa (padrão no Windows, sem instalar nada).
   - `"discord_webhook": "https://discord.com/api/webhooks/..."`: num servidor seu, Configurações do canal → Integrações → Webhooks → Novo webhook → Copiar URL.
@@ -183,7 +183,18 @@ Consequências:
 ### Robô coletor com conta separada (caminho atual)
 O Tampermonkey não roda direito dentro do Idle Deck, então a coleta saiu do navegador: `src/robo.py` entra com uma **conta separada, só para coletar** (os Termos permitem 4 por pessoa e 4 conectadas por rede), faz uma rodada curta e desconecta.
 
-- **Rodada:** `hello` → espera o `welcome` (aguenta a fila de login do gateway) → `csv.pedir` quando o jogo libera (1 por hora, pelo `esperaMs`/`restaMs`) e `market.itens` a cada 15 min (era 30 até 08/11; mudou para pegar anúncios baratos mais cedo) → grava → desconecta. Os nomes dos itens vêm do `items.json` público uma vez por dia.
+- **Sessão contínua (desde 09/11):** `hello` → espera o `welcome` (aguenta a fila de login do gateway) e **fica conectado**:
+  - `market.itens` (a vitrine) a cada minuto. Era 30 min até 08/11 e 15 min até 09/11; a vitrine atrasada atrapalhava a análise de venda, e é um pedido leve, como abrir a loja.
+  - `csv.pedir` quando o jogo libera (1 por hora, pelo `esperaMs`/`restaMs`).
+  - A loja de Pokémon a cada 3 h.
+
+  Antes, cada rodada fazia login e desconectava. Com a vitrine de minuto em minuto, isso seria um login por minuto, então ficar conectado pesa menos para o servidor. Um ping a cada 25 s mantém a conexão.
+  - Antes de cada pedido, o robô descarta o que chegou sem ser pedido, para não confundir uma atualização velha com a resposta.
+  - Se a conexão cair, entra de novo depois de 1 min, dobrando a cada queda seguida até 10 min. A espera volta a 1 min depois de 10 min conectado.
+  - 4001 (conta aberta em outro lugar) continua esperando 30 min.
+  - A conta coletora agora fica online o tempo todo e conta no limite de 4 contas conectadas por rede.
+- **Vitrine no banco:** os retratos de minuto ficam 3 dias. Depois, uma poda de hora em hora deixa só um a cada 15 min, a mesma resolução do histórico de antes. Sem a poda seriam ~50 mil linhas por dia. No `robo.log` aparece uma linha de vitrine a cada 15 min, não a cada minuto.
+- Os nomes dos itens vêm do `items.json` público uma vez por dia.
 - **Token:** fica em `config.local.json` (fora do controle de versão). O jogo renova o token depois de 15 dias (`sessao.renovada`) e o robô salva o novo sozinho.
 - **Sessão tomada (4001):** se a conta coletora for aberta em outro lugar, o robô espera 30 min em vez de brigar pela sessão.
 - **Recusas de conta** (token inválido, ban, rede bloqueada) param o robô com uma mensagem clara. Rede cheia faz ele tentar de novo mais tarde.
