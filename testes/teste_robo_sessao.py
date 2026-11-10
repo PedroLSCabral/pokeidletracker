@@ -37,6 +37,9 @@ robo.CONFIG.write_text(json.dumps({"nick": "coletora", "token": "tok1"}))
 robo.baixar_itens = lambda con: coletor.receber_itens(con, {"items": [{"id": 2, "name": "Ancient Stone", "category": "stone"}]})
 robo.checar_alertas = lambda: None
 robo.PVP_META_A_CADA_MS = 10**14        # sem pré-carga do PvP (iria à internet)
+robo.CATALOGO_A_CADA_MS = 10**14        # sem baixar o catálogo do jogo (iria à internet)
+robo.caminhos.JOGO = TMP / "jogo"       # o welcome falso fica na pasta temporária
+robo.caminhos.WELCOME_JOGO = TMP / "jogo" / "welcome-dados.json"
 lojapk.INTERVALO_MS = 10**14            # sem loja de Pokémon neste teste
 coletor.VITRINE_A_CADA_MS = 1000        # 1 s no lugar de 1 min
 robo.RECONEXAO_MIN_S = 1

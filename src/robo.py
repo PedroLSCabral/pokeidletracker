@@ -35,7 +35,7 @@ import websockets
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import caminhos  # noqa: E402
 import notificar  # noqa: E402
-from analise import pvp, sinais  # noqa: E402
+from analise import caca, pvp, sinais  # noqa: E402
 from coleta import coletor, importer, lojapk  # noqa: E402
 
 MAX_ALERTAS_SEPARADOS = 5   # acima disso, o resto vai junto numa mensagem só
@@ -59,6 +59,7 @@ RECONEXAO_MIN_S, RECONEXAO_MAX_S = 60, 10 * 60   # queda de conexão: 1 min, dob
 SESSAO_ESTAVEL_S = 10 * 60                        # conectado por mais que isso zera a espera
 PODAR_A_CADA_MS = 60 * 60_000
 PVP_META_A_CADA_MS = 6 * 60 * 60_000   # pré-carga do meta do PvP (Tracker público, sem login)
+CATALOGO_A_CADA_MS = 24 * 60 * 60_000  # catálogo de espécies e golpes do jogo (assets públicos), para o XP/h
 
 RECUSAS_FATAIS = {
     "auth.contaBanida": "a conta coletora foi banida",
@@ -304,6 +305,22 @@ def tarefas_locais(con) -> None:
     if t - coletor.get(con, "pvp_meta_em") >= PVP_META_A_CADA_MS:
         coletor.put(con, pvp_meta_em=t)
         threading.Thread(target=_precarregar_pvp, name="pvp-meta", daemon=True).start()
+    if t - coletor.get(con, "catalogo_jogo_em") >= CATALOGO_A_CADA_MS:
+        coletor.put(con, catalogo_jogo_em=t)
+        threading.Thread(target=_baixar_catalogo, name="catalogo-jogo", daemon=True).start()
+
+
+def _baixar_catalogo() -> None:
+    """Em segundo plano: 5 arquivos públicos (~4 MB) com 1 s entre eles, uma vez por dia."""
+    try:
+        log(f"caça: catálogo do jogo atualizado ({caca.baixar_catalogo()} espécies)")
+    except Exception as e:
+        log(f"caça: catálogo do jogo falhou: {e!r}")
+        con = importer.connect()
+        try:  # tenta de novo em 1 h
+            coletor.put(con, catalogo_jogo_em=coletor.agora_ms() - CATALOGO_A_CADA_MS + 3600_000)
+        finally:
+            con.close()
 
 
 def _precarregar_pvp() -> None:
@@ -330,8 +347,14 @@ async def sessao(cfg: dict, uma_vez: bool) -> None:
         try:
             await ws.send(json.dumps({"t": "hello", "nick": cfg["nick"], "token": cfg["token"],
                                       "delta": 1, "dispositivo": cfg["dispositivo"]}))
-            await s.esperar(lambda m: m.get("t") == "welcome", ESPERA_WELCOME_S)
+            welcome = await s.esperar(lambda m: m.get("t") == "welcome", ESPERA_WELCOME_S)
             log("conectado (fica conectado entre as leituras)")
+            try:  # as hunts e as constantes de caça vêm no welcome: guarda para o XP/h da busca
+                r = caca.guardar_welcome(welcome)
+                if not r["hunts"]:
+                    log(f"caça: o welcome não trouxe a lista de hunts ({r})")
+            except Exception as e:
+                log(f"caça: não deu para guardar o welcome: {e!r}")
             agora(erro=None, conectado_ms=coletor.agora_ms())
             while True:
                 con = importer.connect()

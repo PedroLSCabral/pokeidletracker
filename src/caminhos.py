@@ -18,6 +18,9 @@ DADOS = RAIZ / "data"
 BANCO = DADOS / "market.db"            # SQLite com vendas, vitrine, loja de Pokémon, alertas e cache do PvP
 LOG_ROBO = DADOS / "robo.log"          # o que o robô fez (export, vitrine, alertas, quedas)
 AGORA_ROBO = DADOS / "robo_agora.json"  # o que o robô está fazendo agora (lido pela janelinha de status)
+JOGO = DADOS / "jogo"                  # dados do jogo para a conta de XP/h (analise/caca.py)
+CATALOGO_JOGO = JOGO / "catalogo.json"     # espécies, stats-base e golpes (dos assets públicos, 1 vez por dia)
+WELCOME_JOGO = JOGO / "welcome-dados.json"  # hunts e constantes de caça, tirados do welcome a cada login
 
 # Página do painel (HTML/CSS/JS servidos pelo painel.py).
 WEB = SRC / "web"

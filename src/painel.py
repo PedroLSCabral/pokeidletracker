@@ -10,6 +10,7 @@ import json
 import mimetypes
 import statistics
 import sys
+import threading
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -21,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import caminhos  # noqa: E402
 import notificar  # noqa: E402
 from analise import pokemon as analise_pokemon  # noqa: E402
-from analise import pvp, sinais, venda  # noqa: E402
+from analise import caca, pvp, sinais, venda  # noqa: E402
 from coleta import coletor, importer  # noqa: E402
 
 HOST, PORT = "127.0.0.1", 8770
@@ -468,7 +469,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(analise_pokemon.buscar(
                         con, num("orcamento", 1e18), moeda, objetivo,
                         q.get("especie", "").strip()[:40], q.get("tipo", "")[:12], q.get("shiny") == "1",
-                        int(num("pmin")), int(num("nivel")), num("nota"), pesos_pvp=pesos) | {"objetivos": analise_pokemon.OBJETIVOS})
+                        int(num("pmin")), int(num("nivel")), num("nota"), pesos_pvp=pesos,
+                        nivel_treinador=int(num("treinador")) or None) | {"objetivos": analise_pokemon.OBJETIVOS})
                 if url.path == "/api/pvp":
                     orc = float(q["orcamento"]) if q.get("orcamento", "").strip() else None
                     return self._json(pvp.analisar(con, q.get("nick", "")[:20], q.get("faixa", "")[:12], orc,
@@ -527,6 +529,19 @@ class Servidor(ThreadingHTTPServer):
     allow_reuse_address = False
 
 
+def aquecer() -> None:
+    """Em segundo plano, ao ligar: o modelo de preço justo (~3 s) e o motor de caça, para a 1ª busca de
+    Pokémon não pagar esse tempo."""
+    con = importer.connect()
+    try:
+        analise_pokemon.comparaveis(con)
+        caca.motor()
+    except Exception as e:  # noqa: BLE001 - é só para adiantar; a busca faz de novo se precisar
+        print(f"aquecimento: {e!r}", flush=True)
+    finally:
+        con.close()
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     porta = PORT
@@ -538,6 +553,7 @@ def main():
         print(f"A porta {porta} já está em uso: o painel provavelmente já está aberto em http://{HOST}:{porta}", flush=True)
         sys.exit(3)  # 3 = não adianta religar (a bandeja respeita isso)
     print(f"Painel em http://{HOST}:{porta}  (Ctrl+C para parar)", flush=True)
+    threading.Thread(target=aquecer, name="aquecer", daemon=True).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

@@ -395,5 +395,20 @@ Uma calculadora da comunidade ("vale a pena comprar?") simula a caça nível a n
 - **Ficou de fora, por ora:** simular a caça inteira (mapas, HP e defesa dos selvagens, recargas e tempo morto por abate), como faz a calculadora. Seria o passo seguinte para comparar "o meu Pokémon de agora contra um candidato".
 - **Bug achado no caminho:** uma espécie cujas vendas saíam todas como fora da curva no 2º ajuste do modelo derrubava a busca com erro (KeyError).
 
+## XP por hora na busca de Pokémon (10/11)
+Simular a caça inteira, como a calculadora da comunidade faz, leva segundos por Pokémon. Isso não serve para ordenar a loja. A busca ganhou um motor próprio (`analise/caca.py`) com três atalhos:
+- só o nível de agora;
+- uma estimativa fechada em todas as hunts (cada golpe uma vez por recarga, a Investida a cada 2 s);
+- a mini-luta só nas 8 melhores estimativas.
+
+O custo ficou em ~5 ms por Pokémon. Na busca, um funil de 200 (pelo índice de caça) e um cache deixam a lista em ~1 s na primeira vez e ~0,25 s depois.
+
+O que a validação ensinou:
+- **Golpes:** sem os golpes de assinatura (poder 600) e os das planilhas de balanceamento, o XP/h saía até 50% abaixo. O jogo injeta os dois no cliente, e o `creatures.json` sozinho não traz.
+- **Limite de golpes por abate:** precisa ser folgado. Abaixo do nível 150 o XP do abate cresce com o quadrado do nível, e um Pokémon fraco rende mais numa hunt alta de luta longa.
+- **Rolagens de HP:** 4 rolagens enviesavam o resultado (o golpe de 60 s pronto no 1º abate pesava 1 em 4). Com 16 ficou bom.
+- **Resultado:** contra a calculadora, a mesma hunt em 6 de 6 casos, com o XP/h entre −15% e +17%. O ponto fixo do tempo morto melhorava pouco e custava 1,7×, então ficou de fora.
+- **Outra lentidão achada no caminho:** a busca de Pokémon refazia o modelo de preço justo (~3 s) em toda chamada. Agora ele fica em memória até entrar venda nova.
+
 ## Perguntas em aberto
 - Os nomes no export para as outras raridades devem ser `Uncommon`, `Mythic` e `Legendary` (só vimos `Common` e `Rare`). Isso se confirma quando aparecerem vendas.

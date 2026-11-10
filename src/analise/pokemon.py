@@ -29,6 +29,7 @@ import time
 from collections import Counter, defaultdict
 from datetime import datetime
 
+from analise import caca
 from coleta import importer, lojapk
 
 DIA = 86_400_000
@@ -37,9 +38,11 @@ MIN_LOCAIS = 5            # vendas parecidas suficientes para usar a mediana del
 MIN_LOCAIS_ALTA = 8       # ...e para chamar isso de confiança alta
 MIN_GRUPO = 3             # vendas da espécie (mesmo shiny e moeda) para ter um preço base
 DIARIA_ANUNCIO_COINS = 100_000
+FUNIL_XP = 200            # objetivo "xp": só os N melhores pelo índice de caça passam pela conta de XP/h
 
 OBJETIVOS = {
     "equilibrado": "bom de caça e com preço justo (60% dano de caça, 40% desconto)",
+    "xp": "mais XP por hora caçando (a melhor hunt liberada para o seu nível de treinador)",
     "caca": "melhor para caçar e upar: maior dano por golpe (nível × ATK ou SP.ATK)",
     "forte": "o maior ⚔ do jogo (a soma dos 6 atributos, a régua do ranking)",
     "barganha": "o maior desconto contra o preço justo",
@@ -189,11 +192,24 @@ class Comparaveis:
                 "confianca": conf, "metodo": "modelo"}
 
 
+_modelo: tuple | None = None   # (chave, Comparaveis)
+
+
+def comparaveis(con) -> Comparaveis:
+    """O modelo de preço justo, refeito só quando entra venda nova no banco ou a hora vira (a janela de 14
+    dias anda). Ajustar do zero leva ~3 s; sem isto, toda busca pagava esse tempo."""
+    global _modelo
+    chave = (con.execute("SELECT MAX(rowid) FROM trades").fetchone()[0], int(time.time() // 3600))
+    if _modelo is None or _modelo[0] != chave:
+        _modelo = (chave, Comparaveis(con))
+    return _modelo[1]
+
+
 # ---------------------------------------------------------------- busca por orçamento
 
 def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibrado", especie: str = "",
            tipo: str = "", shiny: bool = False, potencia_min: int = 0, nivel_min: int = 0, nota_min: float = 0,
-           limite: int = 60, pesos_pvp: dict[int, float] | None = None) -> dict:
+           limite: int = 60, pesos_pvp: dict[int, float] | None = None, nivel_treinador: int | None = None) -> dict:
     lojapk.preparar(con)
     filtro = ["ativo = 1", "moeda = ?", "preco <= ?"]
     args: list = [moeda, orcamento]
@@ -215,7 +231,7 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
         filtro.append("nota >= ?")
         args.append(nota_min)
     linhas = con.execute(f"SELECT * FROM pk_anuncios WHERE {' AND '.join(filtro)}", args).fetchall()
-    comps = Comparaveis(con)
+    comps = comparaveis(con)
     res = []
     for r in linhas:
         j = comps.preco_justo(r["especie"], r["shiny"], moeda, r["nivel"], r["nota"], r["potencia"])
@@ -237,7 +253,24 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
         item["poder_por_preco"] = (r["poder"] or 0) / preco if preco else 0
         item["caca"], item["ataque"] = indice_caca(r["nivel"], r["stats"])
         item["caca_por_preco"] = (item["caca"] or 0) / preco if preco else 0
+        item["_ficha"] = (r["species_id"], r["nivel"], r["stats"], r["ivs"], r["tipos"])
         res.append(item)
+
+    # XP/h (analise/caca.py): ~5 ms por anúncio, então só para quem precisa. No objetivo "xp", o funil: os
+    # FUNIL_XP melhores pelo índice de caça (quem mais bate é quem pode caçar mais alto). Nos outros, só os
+    # que aparecem na lista.
+    try:
+        motor = caca.motor()
+        aviso_xp = None
+    except caca.SemDados as e:
+        motor, aviso_xp = None, str(e)
+
+    def com_xp(lista):
+        for x in lista:
+            r = caca.xp_do_anuncio(motor, x["id"], *x["_ficha"], nivel_treinador) if motor else None
+            x["xp_h"] = round(r["xp_h"]) if r else None
+            x["xp_hunt"] = r and {"nome": r["hunt"], "nivel": r["nivel_hunt"], "abates_h": round(r["kph"]),
+                                  "luta_s": r["luta_s"], "morre": r["morre"]}
 
     # Ordenação pelo objetivo.
     def pct(chave):
@@ -245,7 +278,12 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
         n = len(vals)
         return (lambda v: 0.5 if v is None or n < 2 else (vals.index(v) if v in vals else 0) / (n - 1))
 
-    if objetivo == "forte":
+    if objetivo == "xp":
+        res.sort(key=lambda x: -(x["caca"] or 0))
+        res = res[:FUNIL_XP]
+        com_xp(res)
+        res.sort(key=lambda x: (-(x["xp_h"] or 0), x["preco"]))
+    elif objetivo == "forte":
         res.sort(key=lambda x: (-(x["poder"] or 0), x["preco"]))
     elif objetivo == "barganha":
         peso_conf = {"alta": 0, "média": 1, "baixa": 2, None: 3}
@@ -270,8 +308,15 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
             d = p_desc(x["desconto"]) if x["confianca"] in ("alta", "média") else 0.5
             x["pontos"] = round(0.6 * p_caca(x["caca"]) + 0.4 * d, 3)
         res.sort(key=lambda x: -x["pontos"])
+    total = len(linhas)
+    res = res[:limite]
+    if objetivo != "xp":
+        com_xp(res)
+    for x in res:
+        x.pop("_ficha", None)
     snap = con.execute("SELECT MAX(snap_ms) FROM pk_varreduras").fetchone()[0]
-    return {"total": len(res), "itens": res[:limite], "objetivo": objetivo, "orcamento": orcamento, "moeda": moeda,
+    return {"total": total, "itens": res, "objetivo": objetivo, "orcamento": orcamento, "moeda": moeda,
+            "nivel_treinador": nivel_treinador, "aviso_xp": aviso_xp, "funil_xp": FUNIL_XP if objetivo == "xp" else None,
             "varredura_ms": snap, "anuncios_na_loja": con.execute("SELECT COUNT(*) FROM pk_anuncios WHERE ativo=1").fetchone()[0]}
 
 

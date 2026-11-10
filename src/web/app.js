@@ -958,8 +958,11 @@ function ligarPvp() {
 const TIPOS_PK = { NORMAL: 'Normal', FIRE: 'Fogo', WATER: 'Água', GRASS: 'Planta', ELECTRIC: 'Elétrico', ICE: 'Gelo',
   FIGHTING: 'Lutador', POISON: 'Veneno', GROUND: 'Terra', FLYING: 'Voador', PSYCHIC: 'Psíquico', BUG: 'Inseto',
   ROCK: 'Pedra', GHOST: 'Fantasma', DRAGON: 'Dragão', DARK: 'Sombrio', STEEL: 'Aço', FAIRY: 'Fada' };
+// 1.234.567 → "1,2 mi": o XP/h vai de milhares a bilhões.
+const curto = (v) => (v >= 1e9 ? `${nf(2).format(v / 1e9)} bi` : v >= 1e6 ? `${nf(1).format(v / 1e6)} mi` : v >= 1e3 ? `${nf(0).format(v / 1e3)} mil` : nf(0).format(v));
 const OBJETIVOS_PK = {
   equilibrado: 'equilibrado: bom de caça e com preço justo',
+  xp: 'mais XP por hora caçando (simula a melhor hunt)',
   caca: 'melhor para caçar e upar (maior dano por golpe)',
   forte: 'o maior ⚔ do jogo (soma dos 6 atributos)',
   barganha: 'o maior desconto vs preço justo',
@@ -988,18 +991,22 @@ async function buscarPk(e) {
   const d = await api('/api/pk/buscar', {
     orcamento: $('#pkb-orc').value, moeda, objetivo: $('#pkb-obj').value, especie: $('#pkb-esp').value.trim(),
     tipo: $('#pkb-tipo').value, pmin: $('#pkb-pmin').value, nivel: $('#pkb-nivel').value, nota: $('#pkb-nota').value,
-    shiny: $('#pkb-shiny').checked ? 1 : '',
+    shiny: $('#pkb-shiny').checked ? 1 : '', treinador: $('#pkb-treinador').value,
     // Objetivo PvP: o meta do high elo e, se o nick já foi preenchido na aba PvP, as suas ameaças.
     pvp_nick: $('#pkb-obj').value === 'pvp' ? lerLocal('pvp_nick') : '', pvp_faixa: 'alto',
   });
+  gravarLocal('pk_treinador', $('#pkb-treinador').value);
   $('#pkb-sub').textContent = d.varredura_ms
     ? `loja lida às ${fDiaHora.format(d.varredura_ms)} · ${nf(0).format(d.anuncios_na_loja)} anúncios · ${nf(0).format(d.total)} cabem no orçamento`
+      + (d.funil_xp ? ` · XP/h calculado nos ${d.funil_xp} que mais batem` : '')
     : 'a loja ainda não foi lida pelo robô';
+  if (d.aviso_xp) $('#pkb-sub').textContent += ` · XP/h: ${d.aviso_xp}`;
   const m = d.moeda;
   $('#pkb-tabela').innerHTML = `
     <tr><th>#</th><th>Pokémon</th><th class="num">Nv</th><th class="num">P</th><th class="num">IV</th><th class="num">Qual.</th><th class="num">Nota</th>
       <th class="num" title="⚔ do jogo: a soma dos 6 atributos em escala de log (a régua do ranking)">Poder</th>
-      <th class="num" title="Dano de um golpe na caça: (2 × nível ÷ 5 + 2) × o maior entre ATK e SP.ATK, ÷ 100. É o que decide quem mata mais rápido.">Caça</th><th class="num">Preço</th><th class="num">Preço justo</th><th class="num">Desconto</th><th>Confiança</th>
+      <th class="num" title="Dano de um golpe na caça: (2 × nível ÷ 5 + 2) × o maior entre ATK e SP.ATK, ÷ 100. É o que decide quem mata mais rápido.">Caça</th>
+      <th class="num" title="XP por hora na melhor hunt liberada para o seu nível de treinador, sem bônus, AoE, TM, bike ou casa. Passe o mouse no número para ver a hunt.">XP/h</th><th class="num">Preço</th><th class="num">Preço justo</th><th class="num">Desconto</th><th>Confiança</th>
       <th class="num">Lucro revendendo</th><th>Vendedor</th></tr>
     ${d.itens.map((x, i) => `<tr title="IVs: ${Object.entries(x.ivs).map(([k, v]) => k + ' ' + v).join(' · ')}${x.faixa ? ` | vendas parecidas entre ${fmtNum(x.faixa[0], m)} e ${fmtNum(x.faixa[1], m)}` : ''}">
       <td>${i + 1}</td>
@@ -1008,13 +1015,14 @@ async function buscarPk(e) {
       <td class="num">${x.qualidade != null ? nf(3).format(x.qualidade) : '—'}</td><td class="num">${x.nota != null ? nf(3).format(x.nota) : '—'}</td>
       <td class="num">${nf(0).format(x.poder ?? 0)}</td>
       <td class="num" title="${x.ataque ? 'ataque ' + x.ataque : ''}">${x.caca != null ? nf(0).format(x.caca) : '—'}</td>
+      <td class="num" title="${x.xp_hunt ? esc(`${x.xp_hunt.nome} (Nv ${nf(0).format(x.xp_hunt.nivel)}) · ${nf(0).format(x.xp_hunt.abates_h)} abates/h · ${nf(1).format(x.xp_hunt.luta_s)} s de luta por abate${x.xp_hunt.morre ? ' · morre às vezes' : ''}`) : ''}">${x.xp_h != null ? curto(x.xp_h) : '—'}</td>
       <td class="num">${htmlPreco(x.preco, m)}</td>
       <td class="num">${x.justo != null ? fmtNum(x.justo, m) + ` <span class="tag">${x.comps}</span>` : '<span class="aviso">sem vendas parecidas</span>'}</td>
       <td class="num">${x.desconto != null ? htmlVar(x.desconto) : '—'}</td>
       <td>${x.confianca ? `<span class="conf ${x.confianca}">${x.confianca}</span>` : '—'}</td>
       <td class="num ${x.lucro_revenda > 0 ? 'margem-pos' : 'margem-neg'}">${x.lucro_revenda != null ? (x.lucro_revenda > 0 ? '+' : '') + fmtNum(x.lucro_revenda, m) : '—'}</td>
       <td>${esc(x.vendedor)}</td></tr>`).join('')
-      || `<tr><td colspan="15" class="vazio" style="padding:20px">${d.varredura_ms ? 'Nenhum Pokémon da loja cabe nesse orçamento com esses filtros.' : 'O robô ainda não leu a loja de Pokémon (ele faz isso a cada 3 h).'}</td></tr>`}`;
+      || `<tr><td colspan="16" class="vazio" style="padding:20px">${d.varredura_ms ? 'Nenhum Pokémon da loja cabe nesse orçamento com esses filtros.' : 'O robô ainda não leu a loja de Pokémon (ele faz isso a cada 3 h).'}</td></tr>`}`;
 }
 
 async function carregarPadroesPk() {
@@ -1071,6 +1079,7 @@ async function carregarPadroesPk() {
 
 function ligarPokemon() {
   $('#pkb-obj').innerHTML = Object.entries(OBJETIVOS_PK).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
+  $('#pkb-treinador').value = lerLocal('pk_treinador');
   $('#pkb-tipo').innerHTML = '<option value="">qualquer</option>' + Object.entries(TIPOS_PK).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
   $('#pkb-form').addEventListener('submit', buscarPk);
   ligarPvp();

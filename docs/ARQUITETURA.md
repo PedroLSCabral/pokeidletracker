@@ -66,6 +66,7 @@ pokeidletracker/
 │  │  ├─ sinais.py          revenda, barato/caro, liquidez, regras e disparo de alertas
 │  │  ├─ venda.py           botão "vender": moeda, preço e momento
 │  │  ├─ pokemon.py         preço justo de Pokémon, busca por orçamento, padrões do mercado
+│  │  ├─ caca.py            XP por hora de caça de um Pokémon (motor rápido) e os dados do jogo que ele usa
 │  │  └─ pvp.py             aba PvP (Tracker público do jogo)
 │  └─ web/                  a página do painel
 │     ├─ index.html         estrutura das abas e janelas
@@ -78,7 +79,8 @@ pokeidletracker/
 │  └─ iniciar-coletor.bat   liga o servidor do userscript (src/coleta/coletor.py, porta 8765)
 ├─ .claude/launch.json      cópia do painel na porta 8771, para testar sem mexer no que está rodando
 ├─ config.local.json        (fora do git) nick + token da conta coletora, canais de alerta
-└─ data/                    (fora do git) market.db, logs, robo_agora.json, inbox/ do importador
+└─ data/                    (fora do git) market.db, logs, robo_agora.json, inbox/ do importador e jogo/
+                            (catalogo.json e welcome-dados.json, para o XP/h)
 ```
 
 **Como os imports funcionam.** Os quatro programas ficam em `src/` e põem `src/` no `sys.path`. Os
@@ -124,10 +126,11 @@ inicialização com o Windows. Se for preciso mover, rode `python src/bandeja.py
 ### `robo.py`: o coletor
 - **Um robô por PC:** o mutex `Local\PokeIdleTrackerRobo` impede dois. Dois robôs na mesma conta se derrubam com o código 4001; um robô duplicado sai com código 3.
 - **Sessão contínua** (`sessao()`): conecta em `wss://pokeidle.io`, manda `hello`, espera o `welcome` e **fica conectado**. A cada volta do laço:
-  1. `tarefas_locais()`: os nomes dos itens (1 vez por dia), a poda da vitrine (1 vez por hora) e a pré-carga do PvP (a cada 6 h, numa thread).
+  1. `tarefas_locais()`: os nomes dos itens (1 vez por dia), a poda da vitrine (1 vez por hora), a pré-carga do PvP (a cada 6 h, numa thread) e o catálogo de espécies do jogo (1 vez por dia, numa thread, `caca.baixar_catalogo`).
   2. Vê o que está na hora (`proximas_tarefas()`): o export (quando o jogo libera), a vitrine (a cada minuto) e a loja de Pokémon (a cada 3 h).
   3. Faz cada uma: `pedir_export()`, `ler_vitrine()`, `varrer_loja_pokemon()`. Depois, `checar_alertas()`.
   4. Dorme até a próxima tarefa (no mínimo 1 s, no máximo 10 min). Um ping a cada 25 s mantém a conexão viva.
+- **Welcome:** ao entrar, `caca.guardar_welcome()` tira dele as hunts, as constantes de caça e a tabela de tipos e grava em `data/jogo/welcome-dados.json` (o estado da conta não é guardado). Grava também `welcome-esqueleto.json`, só com as chaves, para conferir o formato quando o jogo mudar.
 - **`Sessao`:**
   - um leitor em segundo plano filtra as mensagens que interessam e as põe numa fila;
   - `pedir()` descarta o que chegou sem ser pedido, envia e espera a resposta que satisfaz a condição;
@@ -223,6 +226,7 @@ colunas novas entram com `ALTER TABLE` dentro de `importer.connect()`.
 | `itens_em` | receber_itens | Último `items.json` baixado |
 | `pokemon_em` / `pokemon_tentativa_em` | varrer_loja_pokemon | Última varredura completa e última tentativa (uma tentativa que falha espera 30 min) |
 | `pvp_meta_em` | robo.tarefas_locais | Última pré-carga do PvP |
+| `catalogo_jogo_em` | robo.tarefas_locais | Último catálogo de espécies do jogo baixado (para o XP/h) |
 
 ---
 
@@ -279,7 +283,7 @@ Todas as rotas GET aceitam `moeda=gems|coins` (o padrão é gems).
 | `GET /api/sinais` | `api_sinais` → `sinais.calcular` | Revenda, barato/caro, regras, log de alertas e canais |
 | `GET /api/alertas/novos?desde=ms` | `api_alertas_novos` | Alertas gravados depois de `desde` (para o som) |
 | `GET /api/pokemon?busca=&shiny=&limite=` | `api_pokemon` | Vendas recentes de Pokémon |
-| `GET /api/pk/buscar?orcamento=&objetivo=&especie=&tipo=&pmin=&nivel=&nota=&shiny=&pvp_nick=&pvp_faixa=` | `pokemon.buscar` (+ `pvp.pesos_especies` se `objetivo=pvp`) | Anúncios da loja ordenados pelo objetivo |
+| `GET /api/pk/buscar?orcamento=&objetivo=&especie=&tipo=&pmin=&nivel=&nota=&shiny=&treinador=&pvp_nick=&pvp_faixa=` | `pokemon.buscar` (+ `pvp.pesos_especies` se `objetivo=pvp`) | Anúncios da loja ordenados pelo objetivo, com o XP/h de cada um (`xp_h`, `xp_hunt`) para o nível de treinador `treinador` |
 | `GET /api/pk/padroes?dias=` | `pokemon.padroes` | Padrões do mercado de Pokémon |
 | `GET /api/pvp?nick=&faixa=&orcamento=&moeda=` | `pvp.analisar` | Aba PvP inteira |
 | `GET /api/status` | `api_status` → `coletor.status` | Estado da coleta e as últimas linhas do log |
@@ -375,13 +379,29 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   - Uma espécie cujas vendas saem todas como fora da curva no 2º ajuste fica sem preço base: `preco_justo` confere `(especie, shiny) in base` antes de usar o modelo.
 - **`taxa_venda`** calcula a comissão progressiva do jogo para Pokémon.
 - **`indice_caca(nivel, stats)`** é o dano de um golpe na caça, pela fórmula de dano do jogo: `(2·nível/5 + 2) × máx(ATK, SP.ATK) / 100`. Ficam de fora o poder do golpe, a DEF do alvo e o STAB, que valem igual para todos. Os stats do anúncio já vêm no nível dele.
+- **`comparaveis(con)`** guarda o modelo de preço justo em memória e só o refaz quando entra venda nova (`MAX(rowid)` de `trades`) ou a hora vira. Ajustar do zero leva ~3 s; o painel o prepara ao ligar (`painel.aquecer`).
 - **`buscar(...)`** procura na loja (`pk_anuncios`) os anúncios ativos dentro do orçamento e ordena pelo objetivo (`OBJETIVOS`):
+  - `xp` ordena pelo XP/h (`caca.xp_do_anuncio`) na melhor hunt liberada para `nivel_treinador`. Funil: só os `FUNIL_XP` (200) melhores pelo índice de caça passam pela conta. Medido na loja inteira, o top 20 em XP/h sempre esteve entre os 100 que mais batem;
+  - nos outros objetivos o XP/h é calculado só para os itens que aparecem na lista;
   - `caca` ordena pelo índice de caça; `custo`, pelo índice de caça por gema ou coin;
   - `equilibrado` pesa 60% o percentil do índice de caça e 40% o do desconto (só com confiança alta ou média);
   - `forte` ordena pelo ⚔ (`poder`) do jogo; `barganha`, pelo desconto; `nota`, pela nota;
   - `pvp` usa `pesos_pvp` por `species_id` (60%) e o percentil do ⚔ (40%).
 - **Por que não o ⚔ para caçar:** no jogo (`shared/nota-pokemon.mjs`), `poder = nível × 10 × score`, e o score é a soma dos seis stats de nascimento numa escala de log entre o pior e o melhor nascimento possíveis. HP, DEF e SP.DEF pesam tanto quanto o ataque, e o log achata as diferenças: o dobro de ATK dá ~30% a mais de ⚔. Dividir o ⚔ pelo preço favorecia os baratos fracos.
 - **`padroes(...)`** mostra volume, prêmios por atributo, espécies, horários e compradores.
+
+### `analise/caca.py` (XP por hora de caça)
+- **O que responde:** quanto XP/h um Pokémon faz hoje, na melhor hunt liberada para um nível de treinador, sem AoE, TM, bike, casa ou bônus. A explicação completa está no topo do arquivo.
+- **Dados** (em `data/jogo/`, fora do git):
+  - `catalogo.json`, montado por `baixar_catalogo()` como o cliente do jogo monta. Junta os quatro `assets/creatures*.json` e as correções (`creatures-audit-overrides.json`). Troca os golpes pelos das planilhas de balanceamento (`shared/golpes-planilhas.mjs`, lido por expressão regular em `ler_planilhas`). Injeta os golpes de assinatura de poder 600 (`injetar_golpes_600`) e acrescenta as megas com moveset próprio;
+  - `welcome-dados.json`, gravado pelo robô a cada login (`guardar_welcome`): as 1.043 hunts (nível e espécies com peso) e as constantes de caça.
+- **`Motor`** carrega os dois uma vez (`motor()` recarrega quando os arquivos mudam e limpa o cache). `Motor.xp_h(species_id, nivel, stats, ivs, tipos, nivel_treinador)` devolve a melhor hunt com XP/h, abates/h, segundos de luta por abate e se morre às vezes.
+- **Como fica rápido (~5 ms por Pokémon, contra segundos numa simulação completa):**
+  1. só o nível de agora, sem a trilha nível a nível;
+  2. uma estimativa fechada (`_estimar`) em todas as hunts liberadas, da mais alta para a mais baixa, com corte pelo teto de XP/h de cada hunt;
+  3. a mini-luta (`_hunt`, 16 rolagens de HP, golpe a golpe, saltando os trechos só de Investida) só nas `CANDIDATAS` (8) melhores estimativas.
+- **Medido:** contra a busca que simula todas as hunts, mesma hunt e mesmo número em 300 de 300 casos. Contra a calculadora da comunidade, a mesma hunt em 6 de 6 casos, com XP/h entre −15% e +17%.
+- **`xp_do_anuncio(m, id, ...)`** é o atalho da busca: lê os JSON de `pk_anuncios` e guarda o resultado por (anúncio, nível do treinador).
 
 ### `analise/pvp.py` (aba PvP)
 - **Tipos:** `TABELA` é a tabela de tipos da série, a mesma de `shared/tipo-efetividade.mjs` do jogo. `mult(atq, defesa)` dá o multiplicador e `melhor_ataque(atacante, defensor)` o melhor golpe de mesmo tipo.
@@ -465,6 +485,8 @@ robô atualiza o token sozinho quando o jogo manda `sessao.renovada`.
 | Loja de Pokémon | a cada 3 h, 1 s entre páginas, tentativa que falha espera 30 min | lojapk / robo |
 | Nomes de itens | 1 vez por dia | `coletor.ITENS_A_CADA_MS` |
 | Pré-carga do PvP | a cada 6 h | `robo.PVP_META_A_CADA_MS` |
+| Catálogo de espécies do jogo (XP/h) | 1 vez por dia, 1 s entre arquivos; falhou, tenta em 1 h | `robo.CATALOGO_A_CADA_MS` |
+| Hunts e constantes de caça | a cada login (vêm no `welcome`) | `caca.guardar_welcome` |
 | Ping da sessão | 25 s | `Sessao._pingar` |
 | Reconexão | 1 min dobrando até 10 min; 4001 espera 30 min; erro 5 min | robo |
 | Cache do Tracker | 5 min (você) / 6 h (meta e topo) / 12 h (espécie) | `pvp.TTL_S` |
@@ -536,6 +558,13 @@ Os módulos `shared/` do jogo são públicos (por exemplo, `https://pokeidle.io/
 - **⚔ (poder):** `nível × 10 × score`, com o score em log (ver `analise/pokemon.py`).
 - **Mercado:** só aceita Pokémon de nível ≥ 50 e nota ≥ 3,5. Shiny, P5, lendário e mítico passam livres. **Shiny só se anuncia em gemas** (desde 10/10/2026).
 - **Dano na caça:** `((2·nível/5 + 2) × poder do golpe × ATK/DEF) / 50 + 2`, × STAB × efetividade. Na caça, a efetividade é ampliada em 1,5: 2× vira 2,5× e 0,5× vira 0,33×. O golpe usa ATK ou SP.ATK conforme a categoria.
+- **Golpes:**
+  - os das planilhas de balanceamento valem desde o nível 1, com recarga pela curva do poder (10 s no poder 15, 30 s no 100, 60 s no 600);
+  - toda última evolução ganha um golpe de 600 de cada tipo seu (dois se tiver um tipo só), no lado de ataque mais forte, com 60 s de recarga;
+  - a Investida (poder 30, 2 s) sai quando nenhum golpe está pronto. O intervalo entre golpes é 0,9 s, e a Investida e o intervalo caem 10 ms por ponto de IV de SPD.
+- **Selvagem:** stats `(base + 2×16) × nível/100`; vida de combate `máx(24, HP × 12) × 5`; dano dele × 1,8, um golpe a cada 1,4 s.
+- **XP do abate:** uma curva só, pelo nível do selvagem: `⌊0,6·n²⌋ + 8` até 150; acima, `13.500 × (n/150)^1,25`.
+- **Hunt liberada:** nível do treinador ≥ nível da hunt.
 
 ## 15. Armadilhas conhecidas
 
@@ -546,3 +575,4 @@ Os módulos `shared/` do jogo são públicos (por exemplo, `https://pokeidle.io/
 - **O teto da loja de Pokémon é a página 200:** por isso a varredura faz as passadas do mais barato e do mais caro.
 - **O export vem atrasado:** uma venda pode chegar ao banco até ~1 h depois de acontecer. Contagens das últimas horas sobem com o tempo.
 - **Idle Deck:** as contas de caça do dono rodam lá (é um app fechado). O projeto não automatiza essas contas; o PvP lê só o Tracker público.
+- **Dados do XP/h:** a busca mostra "sem os dados do jogo ainda" até o robô entrar uma vez (hunts) e baixar o catálogo. Se o jogo mudar o formato do `welcome` ou da planilha de golpes, compare com `data/jogo/welcome-esqueleto.json` e com a contagem de `ler_planilhas` (26 tabelas, ~1.100 espécies e ~90 megas em 11/2026).

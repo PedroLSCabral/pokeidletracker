@@ -20,6 +20,7 @@ revenda, alertas, botão vender, Pokémon e PvP. A bandeja do Windows mantém os
 | Revenda e alertas | `src/analise/sinais.py` |
 | Botão vender | `src/analise/venda.py` |
 | Preço justo e busca de Pokémon | `src/analise/pokemon.py` |
+| XP por hora de caça (motor rápido) | `src/analise/caca.py` |
 | PvP (Tracker público) | `src/analise/pvp.py` |
 | Rotas da API | `src/painel.py` (`Handler.do_GET`/`do_POST`) |
 | Página (abas, janelas, estilos) | `src/web/index.html`, `app.js`, `app.css` |
