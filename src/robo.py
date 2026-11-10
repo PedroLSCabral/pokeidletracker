@@ -1,7 +1,7 @@
 """Robô coletor: entra com uma CONTA SÓ PARA COLETA, sem navegador, e grava no banco.
 
     python src/robo.py --configurar   # cola o nick + token da conta coletora (uma vez)
-    python src/robo.py                # roda para sempre (PC ou VM)
+    python src/robo.py                # roda para sempre
     python src/robo.py --uma-vez      # uma rodada só (teste)
 
 A cada rodada: conecta no socket do jogo, faz o `hello`, espera o `welcome`, pede o export

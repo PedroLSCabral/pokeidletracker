@@ -2,7 +2,7 @@
 
     python src/painel.py      # abre em http://127.0.0.1:8770
 
-Só escuta no próprio PC. Numa VM, acesse por túnel SSH (ssh -L 8770:127.0.0.1:8770 vm).
+Só escuta no próprio PC.
 """
 from __future__ import annotations
 

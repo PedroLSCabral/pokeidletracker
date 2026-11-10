@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Horário de Brasília fixo (sem horário de verão desde 2019). O CSV do jogo vem nesse fuso, e o
-# coletor pode rodar numa VM em UTC: sem isto, os minutos não bateriam na deduplicação.
+# sistema pode estar em outro fuso: sem isto, os minutos não bateriam na deduplicação.
 BRT = timezone(timedelta(hours=-3))
 
 ROOT = Path(__file__).resolve().parent.parent

@@ -45,7 +45,7 @@ Depende de como o botão de exportar funciona por baixo dos panos; isso precisa 
 - **O robô confere as regras depois de cada coleta** (a cada 15 min). O mesmo alerta não se repete por 6h, a menos que fique 5% melhor. Mais de 5 alertas de uma vez viram uma mensagem só. Tudo vai para `alertas_log`, que aparece no painel.
 - **Canais** (`src/notificar.py`), configurados em `config.local.json`, no bloco `"alertas"`:
   - `"windows": true`: notificação nativa (padrão no Windows, sem instalar nada).
-  - `"discord_webhook": "https://discord.com/api/webhooks/..."`: num servidor seu, Configurações do canal → Integrações → Webhooks → Novo webhook → Copiar URL. **Serve também na VM.**
+  - `"discord_webhook": "https://discord.com/api/webhooks/..."`: num servidor seu, Configurações do canal → Integrações → Webhooks → Novo webhook → Copiar URL.
   - `"telegram_token"` + `"telegram_chat_id"`: crie um bot com o @BotFather e pegue o seu chat id.
   - O botão "enviar notificação de teste" da aba Sinais testa todos os canais configurados.
   - **Aviso sonoro no painel:** com a página aberta, ela confere novos alertas a cada 30 s, toca um som 8-bit gerado na hora (arpejo de moeda para oportunidade, dois toques para os demais), mostra o aviso no canto da tela (clicar abre o item) e põe "(n)" no título da aba se ela estiver em segundo plano. O botão "♪" no topo liga/desliga (a escolha fica salva no navegador). O navegador só libera áudio depois do primeiro clique na página; até lá o botão pisca.
@@ -161,7 +161,7 @@ O Tampermonkey não roda direito dentro do Idle Deck, então a coleta saiu do na
 - **Token:** fica em `config.local.json` (fora do controle de versão). O jogo renova o token depois de 15 dias (`sessao.renovada`) e o robô salva o novo sozinho.
 - **Sessão tomada (4001):** se a conta coletora for aberta em outro lugar, o robô espera 30 min em vez de brigar pela sessão.
 - **Recusas de conta** (token inválido, ban, rede bloqueada) param o robô com uma mensagem clara. Rede cheia faz ele tentar de novo mais tarde.
-- **Fuso fixo em Brasília (UTC−3)**, para os minutos baterem com o CSV mesmo numa VM em UTC.
+- **Fuso fixo em Brasília (UTC−3)**, para os minutos baterem com o CSV mesmo num sistema configurado em outro fuso.
 - **Testado contra um servidor falso** que imita o jogo (export, vitrine, token renovado, recusa, 4001, token inválido e export repetido) e, desde 08/11, rodando contra o jogo de verdade.
 
 #### Passo a passo
@@ -176,10 +176,8 @@ O Tampermonkey não roda direito dentro do Idle Deck, então a coleta saiu do na
 5. **Instalar a dependência** uma vez: `pip install -r requirements.txt`.
 6. **Testar:** `python src/robo.py --uma-vez`. Depois deixar rodando com `iniciar.bat` (ícone na bandeja; log em `data/robo.log`).
 
-#### Numa VM Linux sempre ligada (opcional)
-- Copiar a pasta para a VM, criar `python3 -m venv .venv` e rodar `.venv/bin/pip install -r requirements.txt`. Copiar `config.local.json` e `data/market.db`.
-- Instalar o serviço: `deploy/pokeidle-robo.service` (instruções no próprio arquivo). Ele reinicia sozinho em falhas, mas não fica em laço se o token for recusado.
-- **Desligar o robô do PC quando ligar o da VM:** os dois na mesma conta se derrubariam (4001).
+#### Numa VM ou VPS: não permitido
+A ideia era deixar o robô (e depois as contas que caçam) rodando 24h numa VM na nuvem. Em 09/11/2026 a equipe do jogo confirmou que **VPS não é permitido**, então tudo roda só no PC.
 
 ### Alternativa: userscript no Idle Deck (não funcionou por lá)
 A ideia era aproveitar as contas que já ficam caçando no **Idle Deck** (um navegador para jogos idle), que aceita extensões da Chrome Web Store e scripts do GreasyFork/OpenUserJS. Por isso o coletor é um **userscript** dentro da aba do jogo, sem conta extra.
@@ -218,7 +216,7 @@ Se o Tampermonkey não funcionar no Idle Deck, há um plano B sem `GM_xmlhttpReq
   - Domingo de manhã, 5.000 vendas cobriram só **1h47**. Com export de hora em hora sobra ~47 min de sobreposição; fica de olho em `buracos` no status.
   - Vitrine sem nome para os IDs 70017, 70090 e 70095 (falta identificar).
   - O mapeamento 70014 = Mega Stone Fragment ficou em dúvida: média de 7 dias de 61 contra mínimo de 123.
-- [ ] Opcional: rodar o robô numa VM sempre ligada, para não depender do PC.
+- [x] ~~Fase 5: robô, painel e contas numa VM na nuvem.~~ Descartada: a equipe do jogo confirmou que VPS não é permitido.
 - [x] **Segundo plano + inicialização com o Windows:** `src/bandeja.py` roda o robô e o painel como processos ocultos (sem janelas na barra de tarefas) e põe uma pokébola na bandeja, perto do relógio. Pelo menu do ícone dá para abrir o painel, ver o log, reiniciar cada um, ligar/desligar a inicialização com o Windows e sair. Se um dos dois cair, a bandeja religa (espera 30 s, depois mais a cada queda seguida, até 10 min). Código de saída 3 quer dizer "não adianta religar": é o caso de sessão recusada, robô duplicado ou porta 8770 ocupada. O atalho fica em `shell:startup\PokeIdle Tracker.lnk` (criado com `python src\bandeja.py --instalar` e apagado com `--remover`). Um robô por PC: um mutex do Windows impede dois robôs na mesma conta. Logs: `data/robo.log`, `data/robo.erros.log` (tracebacks), `data/painel.log`, `data/bandeja.log`.
 - [x] **Janelinha de status:** `src/mini.py` abre com o clique esquerdo na pokébola (ou "Status agora" no menu). É uma janela pequena, sempre por cima e sem botão na barra de tarefas, no canto acima do relógio. Mostra:
   - se o robô e o painel estão ligados;

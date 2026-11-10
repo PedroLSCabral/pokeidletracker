@@ -32,7 +32,7 @@ O plano completo, as descobertas sobre o jogo e as decisões estão em [PLANO.md
 
 Para ligar junto com o Windows, marque a opção no menu da pokébola ou rode `python src/bandeja.py --instalar`.
 
-Numa VM Linux o robô também roda sozinho: `python src/robo.py`, ou como serviço com [deploy/pokeidle-robo.service](deploy/pokeidle-robo.service).
+> **Rode no seu próprio PC.** A equipe do jogo confirmou que VPS (máquina virtual na nuvem) não é permitido.
 
 ## Estrutura
 
@@ -49,7 +49,6 @@ Numa VM Linux o robô também roda sozinho: `python src/robo.py`, ou como servi�
 | `src/notificar.py` | Avisos pelo Windows, Discord ou Telegram |
 | `src/analise_pokemon.py` | Fase 4: preço justo, busca por orçamento e padrões de mercado |
 | `src/userscript/`, `extras/` | Primeira tentativa de coleta, por userscript (não funcionou no Idle Deck) |
-| `deploy/` | Serviço systemd para rodar o robô numa VM |
 
 Os dados ficam em `data/`, também fora do git: `market.db`, `robo.log` e `robo_agora.json`.
 
@@ -60,3 +59,4 @@ Os dados ficam em `data/`, também fora do git: `market.db`, `robo.log` e `robo_
 - **Uma conexão por conta.** Se a conta for aberta em outro lugar, o robô espera em vez de disputar a sessão.
 - **Um robô por PC.**
 - **Nada de contornar limites do jogo,** conforme os Termos de Uso.
+- **Nada de VPS:** roda só no PC, como a equipe do jogo pediu.
