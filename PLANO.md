@@ -42,6 +42,7 @@ Depende de como o botão de exportar funciona por baixo dos panos; isso precisa 
   - **barato/caro:** mediana de 24h contra a de 7 dias (só aparece depois de 36h de coleta);
   - **liquidez:** vendas por dia (alta ≥ 20, média ≥ 5, baixa < 5).
 - **Regras de alerta** ficam no banco (`alertas_regras`) e são editadas na aba **Sinais** do painel. Tipos: margem de revenda ≥ X%, menor anúncio ≤ X, mediana 24h ≥ X, variação 7d ≥ X%. Valem para um item ou para qualquer item. Regra inicial: qualquer item, margem ≥ 10%, sem liquidez baixa.
+- **Anúncio abaixo de ¼ da referência fica fora da revenda e dos alertas (09/11).** É a mesma regra das vendas fora da curva. Várias pedras têm dois mercados em gemas, com lotes vendidos a 2 gemas por unidade e unidades avulsas a ~20–200 gemas. Comparar um com o outro disparava alertas de +1.000% a +7.700%. A aba Sinais lista esses itens embaixo da tabela.
 - **O robô confere as regras depois de cada coleta** (a cada minuto, com a vitrine; eram 15 min até 09/11). O mesmo alerta não se repete por 6h, a menos que fique 5% melhor. Mais de 5 alertas de uma vez viram uma mensagem só. Tudo vai para `alertas_log`, que aparece no painel.
 - **Canais** (`src/notificar.py`), configurados em `config.local.json`, no bloco `"alertas"`:
   - `"windows": true`: notificação nativa (padrão no Windows, sem instalar nada).

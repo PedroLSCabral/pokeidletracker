@@ -677,7 +677,11 @@ function desenharSinais() {
       <td class="num">${fmtNum(s.liquido_revenda, m)}</td>
       <td class="num ${s.lucro > 0 ? 'margem-pos' : 'margem-neg'}">${s.lucro > 0 ? '+' : ''}${fmtNum(s.lucro, m)}${m === 'gems' && s.lucro > 0 ? ` <span class="aviso">${usd(s.lucro)}</span>` : ''}</td>
       <td class="num">${htmlVar(s.margem)}</td><td>${htmlLiq(s)}</td></tr>`).join('')
-      || `<tr><td colspan="7" class="vazio" style="padding:20px">Nenhuma revenda com lucro agora: depois dos 15% de taxa, comprar no menor anúncio e revender pela mediana dá prejuízo em todos os itens. Marque "mostrar também as margens negativas" para ver o quanto falta.</td></tr>`}`;
+      || `<tr><td colspan="7" class="vazio" style="padding:20px">Nenhuma revenda com lucro agora: depois dos 15% de taxa, comprar no menor anúncio e revender pela mediana dá prejuízo em todos os itens. Marque "mostrar também as margens negativas" para ver o quanto falta.</td></tr>`}
+    ${(() => {
+      const fora = d.itens.filter((s) => s.anuncio_fora);
+      return fora.length ? `<tr><td colspan="7" class="vazio" style="padding:6px 8px;text-align:left">Fora da conta, com o menor anúncio abaixo de ¼ da referência: ${fora.map((s) => `${esc(s.nome)} (${fmtNum(s.anuncio_min, m)} contra ${fmtNum(s.referencia, m)})`).join(', ')}. Parece outro mercado (lotes vendidos baratos por unidade), não uma pechincha.</td></tr>` : '';
+    })()}`;
   // Barato / caro
   const bc = d.itens.filter((s) => s.desvio != null).sort((a, z) => a.desvio - z.desvio);
   $('#bc-tabela').innerHTML = `

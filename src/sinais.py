@@ -1,7 +1,8 @@
 """Fase 3: sinais de mercado e alertas.
 
 Sinais por item (numa moeda):
-  - oportunidade de revenda: comprar no menor anúncio e revender pelo preço de referência, já pagando a taxa;
+  - oportunidade de revenda: comprar no menor anúncio e revender pelo preço de referência, já pagando a taxa
+    (anúncio abaixo de referência ÷ 4 fica de fora: é outro mercado, não uma pechincha);
   - barato/caro: mediana das últimas 24 h contra a de 7 dias;
   - liquidez: vendas por dia (pouca venda = difícil revender rápido).
 
@@ -126,13 +127,17 @@ def calcular(con, moeda: str = "gems") -> list[dict]:
         anuncio = v["mn"] if v else None
         # A taxa em gema é arredondada para cima pelo jogo.
         liquido = (ref - (math.ceil(ref * TAXA) if moeda == "gems" else ref * TAXA)) if ref else None
-        lucro = (liquido - anuncio) if (liquido is not None and anuncio) else None
+        # Anúncio abaixo de referência ÷ 4: a mesma regra que tira vendas fora da curva. Acontece em
+        # itens com dois mercados (ex.: pedras vendidas em lote a 2 gemas e avulsas a 180): comparar
+        # um com o outro dá "lucro" de milhares de %. Fica de fora da revenda e dos alertas.
+        anuncio_fora = bool(anuncio and ref and anuncio < ref / FATOR_OUTLIER)
+        lucro = (liquido - anuncio) if (liquido is not None and anuncio and not anuncio_fora) else None
         out.append({
             "nome": nome, "moeda": moeda,
             "mediana24h": med24, "mediana7d": med7, "vendas7d": len(p7), "vendas24h": len(p24),
             "vendas_dia": round(vendas_dia, 1), "liquidez": liquidez(vendas_dia),
             "anuncio_min": anuncio, "anuncios": v["anuncios"] if v else None, "unidades_anunciadas": v["unidades"] if v else None,
-            "referencia": ref, "liquido_revenda": liquido, "lucro": lucro,
+            "referencia": ref, "liquido_revenda": liquido, "lucro": lucro, "anuncio_fora": anuncio_fora,
             "margem": round(lucro / anuncio * 100, 1) if lucro is not None and anuncio else None,
             # Só compara 24h com 7d quando há mais de 36h de dados (antes disso as duas janelas são quase iguais).
             "desvio": round((med24 / med7 - 1) * 100, 1)
