@@ -23,6 +23,7 @@ import coletor  # noqa: E402
 import importer  # noqa: E402
 import notificar  # noqa: E402
 import sinais  # noqa: E402
+import venda  # noqa: E402
 
 HOST, PORT = "127.0.0.1", 8770
 WEB = Path(__file__).resolve().parent / "painel"
@@ -361,6 +362,15 @@ def api_sinais(con, moeda: str) -> dict:
             "taxa": sinais.TAXA, "min_vendas_ref": sinais.MIN_VENDAS_REF}
 
 
+def api_venda(con, nome: str, qtd: int) -> dict:
+    """Vender o que dropou: moeda, preço e momento (src/venda.py)."""
+    if not nome:
+        raise ValueError("falta o nome do item")
+    d = venda.analisar(con, nome, qtd, MONTAGENS, RARIDADES)
+    d["icone"] = mapa_icones(con).get(nome, ICONE_GENERICO)
+    return d
+
+
 def api_alertas_novos(con, desde_ms: int) -> dict:
     """Para o aviso sonoro da página: os alertas gravados pelo robô depois do horário `desde_ms`.
     (Pelo horário e não pelo id: o SQLite pode reaproveitar ids de linhas apagadas.)"""
@@ -456,6 +466,8 @@ class Handler(BaseHTTPRequestHandler):
                         con, num("orcamento", 1e18), moeda, q.get("objetivo", "equilibrado"),
                         q.get("especie", "").strip()[:40], q.get("tipo", "")[:12], q.get("shiny") == "1",
                         int(num("pmin")), int(num("nivel")), num("nota")) | {"objetivos": analise_pokemon.OBJETIVOS})
+                if url.path == "/api/venda":
+                    return self._json(api_venda(con, q.get("nome", "").strip()[:80], min(max(int(q.get("qtd", 1) or 1), 1), 1_000_000)))
                 if url.path == "/api/alertas/novos":
                     return self._json(api_alertas_novos(con, int(q.get("desde", -1))))
                 return self._json({"erro": "rota desconhecida"}, 404)

@@ -48,6 +48,7 @@ Para ligar junto com o Windows, marque a opção no menu da pokébola ou rode `p
 | `src/sinais.py` | Fase 3: sinais de revenda, regras e histórico de alertas |
 | `src/notificar.py` | Avisos pelo Windows, Discord ou Telegram |
 | `src/analise_pokemon.py` | Fase 4: preço justo, busca por orçamento e padrões de mercado |
+| `src/venda.py` | Botão "vender": em qual moeda, por quanto e quando vender um item que você dropou |
 | `src/userscript/`, `extras/` | Primeira tentativa de coleta, por userscript (não funcionou no Idle Deck) |
 
 Os dados ficam em `data/`, também fora do git: `market.db`, `robo.log` e `robo_agora.json`.

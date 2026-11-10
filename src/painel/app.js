@@ -145,6 +145,7 @@ function desenharLista() {
   const cat = CATEGORIAS.find((c) => c.id === estado.categoria);
   $('#lista-sub').textContent = `${cat && cat.id !== 'todas' ? cat.nome.toLowerCase() + ' · ' : ''}${itens.length} itens · ${estado.moeda === 'gems' ? 'gemas' : 'coins'}`;
   $('#lista').innerHTML = itens.map((i) => `
+    <div class="linha-wrap">
     <button class="linha-item ${classeRaridade(i.nome)} ${i.nome === estado.item ? 'sel' : ''}" data-nome="${esc(i.nome)}">
       <span class="ico">${img(i.icone)}</span>
       <span style="min-width:0">
@@ -156,7 +157,9 @@ function desenharLista() {
         <div>${htmlPreco(i.atual ?? i.anuncio_min)}</div>
         <div>${i.atual == null && i.anuncio_min != null ? '<span class="var zero">anúncio</span>' : htmlVar(i.var24h, '24h')}</div>
       </span>
-    </button>`).join('') || '<div class="vazio">Nada encontrado.</div>';
+    </button>
+    <button class="btn-vender" data-vender="${esc(i.nome)}" title="Vender: quanto pedir, em qual moeda e quando">vender</button>
+    </div>`).join('') || '<div class="vazio">Nada encontrado.</div>';
 }
 
 // ------------------------------------------------------------------ detalhe
@@ -174,6 +177,7 @@ function desenharDetalhe(d) {
   const s = d.stats, v = d.vitrine, moeda = d.moeda;
   $('#det-ico').innerHTML = img(d.icone);
   $('#det-nome').textContent = d.nome;
+  $('#det-vender').classList.remove('hidden');
   const desde = s.primeira ? fDiaHora.format(s.primeira) : '—';
   $('#detalhe').innerHTML = `
     <div class="tiles">
@@ -466,6 +470,165 @@ async function carregarMontagem() {
       </div>`;
   }).join('');
   $('#montagens').innerHTML = html;
+}
+
+// ------------------------------------------------------------------ vender (o que dropou)
+const venda = { nome: null, qtd: 1, moeda: null, d: null };
+const COR_ACAO = { agora: 'sobe', esperar: 'ouro', segurar: 'ouro', misto: 'neutro', tanto_faz: 'neutro', sem_dados: 'apagado' };
+const LINHA_INDICADA = { agora: 'rapido', esperar: 'normal', segurar: 'paciente', misto: 'normal', tanto_faz: 'normal', sem_dados: 'normal' };
+const NOME_OPCAO = { rapido: 'Rápido', normal: 'Normal', paciente: 'Paciente' };
+
+function tempoEspera(min) {
+  if (min == null) return '';
+  if (min < 1) return 'menos de 1 min';
+  if (min < 90) return `~${nf(0).format(min)} min`;
+  if (min < 48 * 60) return `~${nf(0).format(min / 60)} h`;
+  return `~${nf(0).format(min / 1440)} dias`;
+}
+
+async function abrirVenda(nome) {
+  venda.nome = nome;
+  venda.moeda = null;
+  venda.d = null;
+  const r = (estado.resumo?.itens || []).find((i) => i.nome === nome);
+  $('#venda-ico').innerHTML = img(r?.icone);
+  $('#venda-nome').textContent = nome;
+  $('#venda-qtd').value = venda.qtd = 1;
+  $('#venda-corpo').innerHTML = '<div class="vazio">Analisando as vendas…</div>';
+  $('#venda-fundo').classList.remove('hidden');
+  $('#venda-qtd').focus();
+  $('#venda-qtd').select();
+  try {
+    const d = await api('/api/venda', { nome });
+    if (venda.nome !== nome) return; // outro item já foi aberto
+    venda.d = d;
+    venda.moeda = d.escolha.moeda || 'gems';
+    $('#venda-ico').innerHTML = img(d.icone);
+    desenharVenda();
+  } catch (e) {
+    if (venda.nome === nome) $('#venda-corpo').innerHTML = `<div class="vazio">Não deu para analisar: ${esc(e.message)}</div>`;
+  }
+}
+
+function fecharVenda() {
+  $('#venda-fundo').classList.add('hidden');
+  venda.nome = null;
+}
+
+function desenharVenda() {
+  const d = venda.d;
+  if (!d) return;
+  const m = venda.moeda, a = d[m], q = venda.qtd, e = d.escolha;
+  const nomeMoeda = (mo) => (mo === 'gems' ? 'gemas' : 'coins');
+  const abas = ['gems', 'coins'].map((mo) => `<button class="chip ${mo === m ? 'ativa' : ''}" data-vmoeda="${mo}" ${d[mo].tem_mercado ? '' : 'disabled'}>
+      <span class="ico">${img(mo === 'gems' ? IMG.gema : IMG.moeda)}</span>${nomeMoeda(mo)}${mo === e.moeda ? ' (indicada)' : ''}</button>`).join('');
+
+  const veredito = `
+    <div class="caixa venda-moeda">
+      <h3>Em qual moeda</h3>
+      <div class="venda-grande">${e.moeda ? `Venda em ${nomeMoeda(e.moeda)}` : 'Sem mercado'}</div>
+      <p>${esc(e.motivo)}</p>
+      ${e.coins_em_gemas != null && d.cambio.coins_por_gema ? `<p class="aviso">1 unidade vendida em coins vale ~${nf(2).format(e.coins_em_gemas)} gemas depois da troca. Câmbio: ${fmtNum(d.cambio.coins_por_gema, 'coins')} coins por gema, medido em ${d.cambio.itens} itens vendidos nas duas moedas.</p>` : ''}
+      <div class="venda-abas">${abas}</div>
+    </div>`;
+
+  if (!a || !a.tem_mercado) {
+    $('#venda-corpo').innerHTML = `<div class="venda-topo">${veredito}</div><div class="vazio">Sem vendas nem anúncios deste item em ${nomeMoeda(m)}.</div>`;
+    return;
+  }
+
+  const qd = a.quando;
+  const quando = `
+    <div class="caixa venda-quando ${COR_ACAO[qd.acao] || 'neutro'}">
+      <h3>Quando vender <span class="tag" title="Baixa: menos de 3 dias de coleta ou poucas vendas. Média: menos de 7 dias.">confiança ${esc(a.confianca)}</span></h3>
+      <div class="venda-grande">${esc(qd.titulo)}</div>
+      <ul>${qd.motivos.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+      ${qd.alvo ? `<button class="chip" id="venda-alerta" data-alvo="${Math.round(qd.alvo)}">me avise quando a mediana 24h chegar a ${fmtNum(qd.alvo, m)}</button> <span class="aviso" id="venda-alerta-res"></span>` : ''}
+    </div>`;
+
+  // Linhas de preço; preços iguais viram uma linha só ("Rápido / Normal").
+  const linhas = [];
+  for (const k of ['rapido', 'normal', 'paciente']) {
+    const o = a.opcoes[k];
+    if (!o) continue;
+    const ult = linhas[linhas.length - 1];
+    if (ult && ult.o.preco === o.preco) { ult.chaves.push(k); continue; }
+    linhas.push({ chaves: [k], o });
+  }
+  const indicada = LINHA_INDICADA[qd.acao] || 'normal';
+  const espera = a.unidades_dia > 0 ? tempoEspera(q / a.unidades_dia * 1440) : '';
+  const descr = (ks) => {
+    if (ks.includes('rapido')) return `1 abaixo do menor anúncio: você fica em 1º da fila${espera ? ` e sai em ${espera} pelo ritmo de compras` : ''}`;
+    if (ks.includes('normal')) return a.fino ? 'pela média de 7 dias do jogo: quase não há vendas para comparar' : 'o preço das vendas das últimas horas';
+    return 'acima da maioria das vendas: espera um comprador que pague mais';
+  };
+  const tabela = `
+    <div class="caixa">
+      <h3>Por quanto anunciar ${q > 1 ? `(${nf(0).format(q)} unidades)` : ''}</h3>
+      <div class="tabela-wrap" style="max-height:none"><table class="tabela venda-precos">
+        <tr><th></th><th class="num">Anunciar a</th><th class="num">Você recebe</th>${m === 'gems' ? '<th class="num">Em dólar</th>' : ''}<th class="num" title="Das vendas das últimas 48 h, quantas saíram a esse preço ou mais">Vendas 48h ≥</th></tr>
+        ${linhas.map(({ chaves, o }) => `
+          <tr class="${chaves.includes(indicada) ? 'indicada' : ''}">
+            <td><b>${chaves.map((k) => NOME_OPCAO[k]).join(' / ')}</b>${chaves.includes(indicada) ? ' <span class="tag">indicado</span>' : ''}<div class="aviso" style="padding:0">${descr(chaves)}</div></td>
+            <td class="num">${htmlPreco(o.preco, m)}</td>
+            <td class="num">${htmlPreco(o.liquido_un * q, m)}</td>
+            ${m === 'gems' ? `<td class="num">${usd(o.liquido_un * q)}</td>` : ''}
+            <td class="num">${o.vendas_acima != null ? o.vendas_acima + '%' : '—'}</td>
+          </tr>`).join('')}
+      </table></div>
+      <p class="aviso">Já com a taxa de ${Math.round(d.taxa * 100)}% do mercado${m === 'gems' ? ' (em gemas o jogo arredonda a taxa para cima)' : ''}.</p>
+      ${a.anuncio_muito_baixo ? `<p class="aviso">O menor anúncio (${fmtNum(a.anuncio_min, m)}) está muito abaixo do preço de referência. Parece outro mercado, como lotes vendidos baratos por unidade. Ficar em 1º da fila seria dar o item, então o preço rápido ficou de fora. O normal só sai se aparecer um comprador disposto a pagar esse preço.</p>` : ''}
+    </div>`;
+
+  const mh = a.melhor_hora;
+  const contexto = `
+    <div class="tiles venda-tiles">
+      <div class="tile"><div class="rot">Menor anúncio agora</div><div class="val">${htmlPreco(a.anuncio_min, m)}</div><div class="det">${d.anuncios != null ? nf(0).format(d.anuncios) + ' anúncios' : '&nbsp;'}</div></div>
+      <div class="tile"><div class="rot">Média 7d do jogo</div><div class="val">${htmlPreco(a.media7_jogo, m)}</div><div class="det">${a.vs_media7_jogo != null ? `últimas vendas ${htmlVar(a.vs_media7_jogo)}` : '&nbsp;'}</div></div>
+      <div class="tile"><div class="rot">Vendas por dia</div><div class="val">${nf(a.vendas_dia < 10 ? 1 : 0).format(a.vendas_dia)}</div><div class="det">${nf(0).format(a.unidades_dia)} unidades/dia</div></div>
+      <div class="tile"><div class="rot">Estoque à venda</div><div class="val">${d.estoque_dias != null ? nf(1).format(d.estoque_dias) + ' d' : '—'}</div><div class="det">${d.estoque_unidades != null ? nf(0).format(d.estoque_unidades) + ' un. ÷ ritmo de compra' : '&nbsp;'}</div></div>
+      <div class="tile"><div class="rot">Mais compras</div><div class="val">${mh ? `${mh.inicio}h–${mh.fim}h` : '—'}</div><div class="det">${mh ? `${mh.parte}% das unidades` : 'com 3+ dias de coleta'}</div></div>
+    </div>`;
+
+  const mt = d.montagem;
+  const montagem = mt && m === 'gems' && mt.vantagem != null ? `
+    <div class="caixa">
+      <h3>Ou juntar 10 e montar</h3>
+      <p>Montar ${mt.sufixo === 'House' ? 'uma casa' : 'uma bicicleta'} com 10 fragmentos ${mt.vantagem >= 0 ? 'rende' : 'perde'} <b>${nf(1).format(Math.abs(mt.vantagem))}%</b> em média, contra vender os 10 pelo preço normal (${htmlPreco(mt.dez_fragmentos, 'gems')} líquido).
+        Sem contar Mítica e Lendária: ${htmlVar(mt.vantagem_sem_raras)}.${mt.vantagem > 0 && mt.vantagem_sem_raras < 0 ? ' A vantagem depende só das raridades altas.' : ''}</p>
+      ${mt.sem_preco.length ? `<p class="aviso">Sem preço, contam como zero: ${esc(mt.sem_preco.join(', '))}.</p>` : ''}
+      <button class="chip" id="venda-montagem">ver a aba Montagem</button>
+    </div>` : '';
+
+  $('#venda-corpo').innerHTML = `<div class="venda-topo">${veredito}${quando}</div>${tabela}${contexto}${montagem}`;
+}
+
+function ligarVenda() {
+  $('#det-vender').addEventListener('click', () => estado.item && abrirVenda(estado.item));
+  $('#venda-fechar').addEventListener('click', fecharVenda);
+  $('#venda-fundo').addEventListener('click', (e) => { if (e.target.id === 'venda-fundo') fecharVenda(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && venda.nome) fecharVenda(); });
+  $('#venda-qtd').addEventListener('input', (e) => {
+    const v = Math.floor(Number(e.target.value));
+    venda.qtd = Number.isFinite(v) && v >= 1 ? v : 1;
+    desenharVenda();
+  });
+  $('#venda-corpo').addEventListener('click', async (e) => {
+    const mo = e.target.closest('[data-vmoeda]');
+    if (mo) { venda.moeda = mo.dataset.vmoeda; desenharVenda(); return; }
+    if (e.target.closest('#venda-montagem')) { fecharVenda(); mostrarAba('montagem'); return; }
+    const al = e.target.closest('#venda-alerta');
+    if (al) {
+      al.disabled = true;
+      try {
+        await postar('/api/regras', { tipo: 'acima', item: venda.nome, moeda: venda.moeda, valor: Number(al.dataset.alvo) });
+        $('#venda-alerta-res').textContent = 'alerta criado (aba Sinais)';
+      } catch (err) {
+        al.disabled = false;
+        $('#venda-alerta-res').textContent = 'não deu: ' + err.message;
+      }
+    }
+  });
 }
 
 // ------------------------------------------------------------------ sinais (Fase 3)
@@ -888,7 +1051,13 @@ function ligar() {
     desenharLista();
   });
   $$('[data-tipo]').forEach((b) => b.addEventListener('click', () => { if (b.dataset.tipo === 'pokemon') mostrarAba('pokemon'); }));
-  $('#lista').addEventListener('click', (e) => { const b = e.target.closest('.linha-item'); if (b) selecionar(b.dataset.nome); });
+  $('#lista').addEventListener('click', (e) => {
+    const v = e.target.closest('[data-vender]');
+    if (v) return abrirVenda(v.dataset.vender);
+    const b = e.target.closest('.linha-item');
+    if (b) selecionar(b.dataset.nome);
+  });
+  ligarVenda();
   const pk = () => { clearTimeout(tPk); tPk = setTimeout(carregarPokemon, 250); };
   $('#pk-busca').addEventListener('input', pk);
   $('#pk-moeda').addEventListener('change', pk);

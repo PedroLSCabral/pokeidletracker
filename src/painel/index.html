@@ -61,6 +61,7 @@
 
     <section class="janela detalhe-janela">
       <div class="janela-titulo"><span class="ico ico-grande" id="det-ico"></span><span id="det-nome">Escolha um item</span>
+        <button class="btn-primario btn-vender-det hidden" id="det-vender" title="Quanto e quando vender este item">vender</button>
         <div class="janelas-tempo" role="group" aria-label="Janela de tempo">
           <button class="chip" data-janela="24h">24h</button>
           <button class="chip ativa" data-janela="7d">7d</button>
@@ -223,6 +224,15 @@
   </section>
 </main>
 
+<div class="modal-fundo hidden" id="venda-fundo">
+  <section class="janela modal" id="venda" role="dialog" aria-modal="true" aria-labelledby="venda-nome">
+    <div class="janela-titulo"><span class="ico ico-grande" id="venda-ico"></span>Vender <span id="venda-nome"></span>
+      <label class="venda-qtd">quantas <input id="venda-qtd" class="campo" type="number" min="1" step="1" value="1"></label>
+      <button class="chip" id="venda-fechar" title="Fechar (Esc)">fechar</button>
+    </div>
+    <div class="janela-corpo" id="venda-corpo"></div>
+  </section>
+</div>
 <div class="tooltip hidden" id="tooltip" role="tooltip"></div>
 <div class="avisos" id="avisos" aria-live="polite"></div>
 <script src="app.js"></script>

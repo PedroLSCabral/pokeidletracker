@@ -87,6 +87,32 @@ Ideias originais desta fase:
 - Agrupar por espécie + shiny + faixa de atributos para ter preços comparáveis
 - Só faz sentido quando já houver bastante histórico; por isso fica por último
 
+### Vender o que dropou (feito em 09/11)
+Botão **vender** em cada item da lista do mercado e no título do detalhe. Abre uma janela com a quantidade e três respostas (`src/venda.py`, rota `/api/venda`):
+- **Em qual moeda.**
+  - O câmbio vem da razão das medianas dos itens vendidos nas duas moedas nas últimas 48 h, pesada pelo volume. Em 09/11 dava ~5,1 mi coins por gema.
+  - Para virar gema, o coin ainda paga outra taxa de 15% (comprar algo em coins e vender em gemas). Por isso coins só ganha se render 5% a mais depois dessa troca.
+  - Se o item quase não vende em gemas e vende bem em coins, a indicação é coins, com aviso.
+- **Por quanto anunciar.** Todos os preços já descontam a taxa e saem com o total em gemas e em dólar:
+  - *rápido:* 1 abaixo do menor anúncio, com a espera estimada pelo ritmo de compras;
+  - *normal:* a mediana das últimas 12 h;
+  - *paciente:* o percentil 75 das vendas de 48 h.
+
+  Cada preço mostra quantas vendas de 48 h saíram a esse valor ou mais. Num mercado fino, o preço rápido some quando ficar em 1º da fila seria dar o item.
+- **Quando vender.**
+  - A tendência é uma reta robusta (Theil-Sen) no log das medianas por hora. A oscilação normal sai dos resíduos dessa reta.
+  - A média de 7 dias do jogo, acompanhada snapshot a snapshot, mostra a semana mesmo com poucos dias de coleta.
+  - Saídas possíveis:
+    - pico: vender agora;
+    - queda constante: vender logo;
+    - queda passageira: esperar, anunciando pelo preço normal;
+    - alta constante: pode segurar até 3 dias, só se o ganho passar da oscilação, e nunca "para sempre";
+    - sinais mistos: os últimos dias contra a semana;
+    - estável.
+  - Em "esperar" e "segurar" há um botão que cria o alerta "mediana 24h ≥ alvo".
+- **Confiança:** baixa com menos de 3 dias de coleta, média até 7 dias. O horário com mais compras só aparece com 3+ dias.
+- **Fragmentos:** a janela também compara vender com juntar 10 e montar (valor esperado, com e sem as raridades altas).
+
 ## Estrutura prevista
 
 ```
