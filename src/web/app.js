@@ -188,11 +188,10 @@ function desenharDetalhe(d) {
       <div class="tile"><div class="rot">Menor anúncio agora</div><div class="val">${htmlPreco(v.min, moeda)}</div><div class="det">${v.anuncios != null ? `${nf(0).format(v.anuncios)} anúncios · ${nf(0).format(v.unidades)} un.` : 'sem dado da vitrine'}</div></div>
       <div class="tile"><div class="rot">Média 7d (jogo)</div><div class="val">${htmlPreco(v.media7, moeda)}</div><div class="det">calculada pelo próprio jogo</div></div>
     </div>
-    <div class="grafico-box">
-      <div class="legenda">
-        <span><span class="sw" style="background:var(--serie-1)"></span>Mediana das vendas</span>
-        <span><span class="sw band" style="background:var(--serie-1)"></span>Faixa mín–máx</span>
-        <span><span class="sw" style="background:var(--serie-2)"></span>Menor anúncio</span>
+    <div class="grafico-box" tabindex="0" aria-label="Gráfico de preço: setas andam de ponto em ponto, Esc solta ou volta o zoom">
+      <div class="barra-grafico">
+        <div class="legenda" id="g-legenda"></div>
+        <div class="zoom" id="g-zoom"></div>
       </div>
       <div class="grafico" id="g-preco"></div>
       <div class="titulo-mini">Unidades vendidas</div>
@@ -248,88 +247,141 @@ function ligarCalculadora(d) {
 }
 
 // ------------------------------------------------------------------ gráfico
+// Leitura do gráfico de preço (e do de volume, que divide o eixo do tempo com ele):
+//  - arrastar faz zoom no trecho; o servidor manda baldes mais finos (até 5 min) e o resumo do trecho;
+//  - clicar fixa o ponto (o tooltip fica parado nele); ← → andam de ponto em ponto; Esc solta;
+//  - a legenda liga e desliga cada série, e a escala de preço se ajusta só ao que está visível.
+const graf = {
+  chave: '',      // item|moeda|janela: trocar qualquer um zera o zoom
+  pilha: [],      // zooms empilhados: {de, ate, passo, serie, anuncios, resumo, carregando}
+  fixo: null,     // t (início do balde) do ponto fixado
+  ocultas: new Set(), // séries escondidas pela legenda (lembradas no localStorage)
+  v: null,        // a vista desenhada agora (escalas e pontos), usada pelos eventos
+};
+
 function passoBonito(bruto) {
   const p = 10 ** Math.floor(Math.log10(bruto));
   const f = bruto / p;
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
 }
 
+// Marcas do eixo do tempo em horas redondas de Brasília (00:00, 06:00…), nunca em horários quebrados.
+const DESLOC_BRT = -3 * 3600_000;
+function marcasTempo(x0, x1, maxMarcas) {
+  const H = 3600_000, D = 24 * H;
+  const passos = [15 * 60_000, 30 * 60_000, H, 2 * H, 3 * H, 6 * H, 12 * H, D, 2 * D, 7 * D, 14 * D, 30 * D];
+  const passo = passos.find((p) => (x1 - x0) / p <= maxMarcas) || passos[passos.length - 1];
+  const out = [];
+  for (let t = Math.ceil((x0 + DESLOC_BRT) / passo) * passo - DESLOC_BRT; t <= x1; t += passo) {
+    const meiaNoite = (t + DESLOC_BRT) % D === 0;
+    out.push({ t, forte: meiaNoite, txt: passo >= D || meiaNoite ? fDia.format(t) : fHora.format(t) });
+  }
+  return out;
+}
+
+function vistaGrafico(d) {
+  const z = graf.pilha[graf.pilha.length - 1];
+  if (z) return { x0: z.de, x1: z.ate, serie: z.serie, anun: z.anuncios.filter((a) => a.min != null), passo: z.passo, zoom: z };
+  return { x0: d.inicio, x1: d.agora, serie: d.serie, anun: d.anuncios.filter((a) => a.min != null), passo: d.passo, zoom: null };
+}
+
 function desenharGraficos(d) {
+  const chave = `${d.nome}|${d.moeda}|${d.janela}`;
+  if (graf.chave !== chave) { graf.chave = chave; graf.pilha = []; graf.fixo = null; }
   const gp = $('#g-preco'), gv = $('#g-vol');
+  if (!gp) return;
   const W = Math.max(320, gp.clientWidth);
-  const H = 260, HV = 70;
-  const m = { l: 62, r: 84, t: 10, b: 22 };
-  const serie = d.serie;
-  const anun = d.anuncios.filter((a) => a.min != null);
+  const H = 270, HV = 70;
+  const m = { l: 62, r: 84, t: 10, b: 24 };
+  const { x0, x1, serie, anun, passo, zoom } = vistaGrafico(d);
   const moeda = d.moeda;
+  const ver = (k) => !graf.ocultas.has(k);
+  desenharBarraGrafico(d, zoom, passo);
   if (!serie.length && !anun.length) {
-    gp.innerHTML = '<div class="vazio">Sem vendas nesta janela. Tente uma janela maior.</div>';
+    gp.innerHTML = `<div class="vazio">${zoom ? 'Sem vendas neste trecho. Volte o zoom.' : 'Sem vendas nesta janela. Tente uma janela maior.'}</div>`;
     gv.innerHTML = ''; $('#g-aviso').textContent = '';
+    graf.v = null;
     return;
   }
-  const x0 = d.inicio, x1 = d.agora;
   const pw = W - m.l - m.r;
   const X = (t) => m.l + ((Math.min(Math.max(t, x0), x1) - x0) / (x1 - x0)) * pw;
-  const centro = (s) => X((s.t + Math.min(s.fim, x1)) / 2);
+  const centro = (s) => X((Math.max(s.t, x0) + Math.min(s.fim, x1)) / 2);
 
-  const vals = serie.flatMap((s) => [s.min, s.max]).concat(anun.map((a) => a.min));
+  // A escala só olha o que está ligado: esconder a faixa mín–máx "abre" a mediana.
+  let vals = [];
+  if (ver('faixa')) vals = vals.concat(serie.flatMap((s) => [s.min, s.max]));
+  if (ver('mediana') || !ver('faixa')) vals = vals.concat(serie.map((s) => s.mediana));
+  if (ver('anuncio')) vals = vals.concat(anun.map((a) => a.min));
+  if (!vals.length) vals = serie.map((s) => s.mediana).concat(anun.map((a) => a.min));
   let lo = Math.min(...vals), hi = Math.max(...vals);
   if (lo === hi) { lo *= 0.9; hi = hi * 1.1 || 1; }
-  const passo = passoBonito((hi - lo) / 4);
-  lo = Math.max(0, Math.floor(lo / passo) * passo);
-  hi = Math.ceil(hi / passo) * passo;
+  const passoY = passoBonito((hi - lo) / 5);
+  lo = Math.max(0, Math.floor(lo / passoY) * passoY);
+  hi = Math.ceil(hi / passoY) * passoY;
   const Y = (v) => m.t + (1 - (v - lo) / (hi - lo)) * (H - m.t - m.b);
 
-  // Grade e eixos (linhas finas e sólidas).
+  // Grade: horizontais em valores redondos, verticais nas marcas do tempo (meia-noite mais forte).
   let svg = '';
-  for (let v = lo; v <= hi + passo / 2; v += passo) {
+  for (let v = lo; v <= hi + passoY / 2; v += passoY) {
     svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grade)" stroke-width="1"/>`;
-    svg += `<text x="${m.l - 8}" y="${Y(v) + 5}" text-anchor="end">${fmtNum(v, moeda)}</text>`;
+    svg += `<text x="${m.l - 8}" y="${Y(v) + 4}" text-anchor="end">${fmtNum(v, moeda)}</text>`;
   }
-  const dias = (x1 - x0) > 36 * 3600_000;
-  for (let i = 0; i <= 4; i++) {
-    const t = x0 + (i / 4) * (x1 - x0);
-    const anc = i === 0 ? 'start' : i === 4 ? 'end' : 'middle';
-    svg += `<text x="${X(t)}" y="${H - 4}" text-anchor="${anc}">${dias ? fDia.format(t) : fHora.format(t)}</text>`;
+  const marcas = marcasTempo(x0, x1, Math.max(3, Math.floor(pw / 80)));
+  let gradeV = '';
+  for (const mk of marcas) {
+    const x = X(mk.t);
+    gradeV += `<line x1="${x}" x2="${x}" y1="${m.t}" y2="${H - m.b}" stroke="var(--grade)" stroke-width="1" ${mk.forte ? '' : 'stroke-dasharray="2 4"'}/>`;
+    const anc = x - m.l < 20 ? 'start' : W - m.r - x < 20 ? 'end' : 'middle';
+    svg += `<text x="${x}" y="${H - 6}" text-anchor="${anc}" ${mk.forte ? 'class="forte"' : ''}>${mk.txt}</text>`;
   }
+  svg = gradeV + svg;
 
-  // Trechos contínuos (um buraco de coleta quebra a linha em vez de inventar o meio).
+  // Trechos contínuos: mais de 3 h sem venda (ou um balde vazio, nos baldes grandes) quebra a linha
+  // em vez de inventar o meio. Abaixo disso a linha liga os pontos e as barras de volume mostram o vazio.
   const trechos = [];
+  const buraco = Math.max(passo * 1.5, 3 * 3600_000);
   serie.forEach((s, i) => {
-    if (!i || s.t - serie[i - 1].t > d.passo * 1.5) trechos.push([]);
+    if (!i || s.t - serie[i - 1].t > buraco) trechos.push([]);
     trechos[trechos.length - 1].push(s);
   });
-  const poucos = serie.length <= 40;
   for (const tr of trechos) {
     if (tr.length === 1) {
       const s = tr[0];
-      svg += `<rect x="${centro(s) - 4}" y="${Y(s.max)}" width="8" height="${Math.max(2, Y(s.min) - Y(s.max))}" fill="var(--serie-1)" opacity=".3"/>`;
+      if (ver('faixa')) svg += `<rect x="${centro(s) - 4}" y="${Y(s.max)}" width="8" height="${Math.max(2, Y(s.min) - Y(s.max))}" fill="var(--serie-1)" opacity=".3"/>`;
     } else {
       const topo = tr.map((s) => `${centro(s)},${Y(s.max)}`).join(' ');
       const base = [...tr].reverse().map((s) => `${centro(s)},${Y(s.min)}`).join(' ');
-      svg += `<polygon points="${topo} ${base}" fill="var(--serie-1)" opacity=".18"/>`;
-      svg += `<path d="M${tr.map((s) => `${centro(s)} ${Y(s.mediana)}`).join(' L')}" fill="none" stroke="var(--serie-1)" stroke-width="2" shape-rendering="geometricPrecision"/>`;
+      if (ver('faixa')) svg += `<polygon points="${topo} ${base}" fill="var(--serie-1)" opacity=".18"/>`;
+      if (ver('mediana')) svg += `<path d="M${tr.map((s) => `${centro(s)} ${Y(s.mediana)}`).join(' L')}" fill="none" stroke="var(--serie-1)" stroke-width="2" stroke-linejoin="round" shape-rendering="geometricPrecision"/>`;
     }
   }
-  if (poucos || trechos.some((t) => t.length === 1)) {
-    serie.forEach((s) => { svg += `<circle cx="${centro(s)}" cy="${Y(s.mediana)}" r="4" fill="var(--serie-1)" stroke="var(--linha)" stroke-width="2" shape-rendering="geometricPrecision"/>`; });
+  // Bolinhas só quando cabem (pelo menos ~10 px entre pontos) ou quando o ponto está sozinho.
+  const cabem = serie.length <= pw / 10;
+  if (ver('mediana')) {
+    serie.forEach((s, i) => {
+      const sozinho = trechos.some((tr) => tr.length === 1 && tr[0] === s);
+      if (cabem || sozinho) svg += `<circle cx="${centro(s)}" cy="${Y(s.mediana)}" r="${cabem ? 3.5 : 3}" fill="var(--serie-1)" stroke="var(--linha)" stroke-width="2" shape-rendering="geometricPrecision"/>`;
+    });
   }
 
-  // Menor anúncio (snapshots da vitrine; buraco > 2 h quebra a linha).
-  const trA = [];
-  anun.forEach((a, i) => {
-    if (!i || a.t - anun[i - 1].t > 2 * 3600_000) trA.push([]);
-    trA[trA.length - 1].push(a);
-  });
-  for (const tr of trA) {
-    if (tr.length > 1) svg += `<path d="M${tr.map((a) => `${X(a.t)} ${Y(a.min)}`).join(' L')}" fill="none" stroke="var(--serie-2)" stroke-width="2" shape-rendering="geometricPrecision"/>`;
+  // Menor anúncio (fotos da vitrine; buraco > 2 h quebra a linha).
+  if (ver('anuncio')) {
+    const trA = [];
+    anun.forEach((a, i) => {
+      if (!i || a.t - anun[i - 1].t > 2 * 3600_000) trA.push([]);
+      trA[trA.length - 1].push(a);
+    });
+    for (const tr of trA) {
+      if (tr.length > 1) svg += `<path d="M${tr.map((a) => `${X(a.t)} ${Y(a.min)}`).join(' L')}" fill="none" stroke="var(--serie-2)" stroke-width="2" stroke-linejoin="round" shape-rendering="geometricPrecision"/>`;
+      else svg += `<circle cx="${X(tr[0].t)}" cy="${Y(tr[0].min)}" r="3" fill="var(--serie-2)" stroke="var(--linha)" stroke-width="2" shape-rendering="geometricPrecision"/>`;
+    }
+    if (anun.length <= pw / 10) anun.forEach((a) => { svg += `<circle cx="${X(a.t)}" cy="${Y(a.min)}" r="3.5" fill="var(--serie-2)" stroke="var(--linha)" stroke-width="2" shape-rendering="geometricPrecision"/>`; });
   }
-  if (anun.length <= 40) anun.forEach((a) => { svg += `<circle cx="${X(a.t)}" cy="${Y(a.min)}" r="4" fill="var(--serie-2)" stroke="var(--linha)" stroke-width="2" shape-rendering="geometricPrecision"/>`; });
 
   // Rótulos diretos só no fim de cada série (o resto fica no tooltip).
   const rots = [];
-  if (serie.length) rots.push({ y: Y(serie[serie.length - 1].mediana), cor: 'var(--serie-1)', txt: fmtNum(serie[serie.length - 1].mediana, moeda) });
-  if (anun.length) rots.push({ y: Y(anun[anun.length - 1].min), cor: 'var(--serie-2)', txt: fmtNum(anun[anun.length - 1].min, moeda) });
+  if (serie.length && ver('mediana')) rots.push({ y: Y(serie[serie.length - 1].mediana), cor: 'var(--serie-1)', txt: fmtNum(serie[serie.length - 1].mediana, moeda) });
+  if (anun.length && ver('anuncio')) rots.push({ y: Y(anun[anun.length - 1].min), cor: 'var(--serie-2)', txt: fmtNum(anun[anun.length - 1].min, moeda) });
   if (rots.length === 2 && Math.abs(rots[0].y - rots[1].y) < 18) {
     const meio = (rots[0].y + rots[1].y) / 2, cima = rots[0].y <= rots[1].y ? 0 : 1;
     rots[cima].y = meio - 9; rots[1 - cima].y = meio + 9;
@@ -339,8 +391,16 @@ function desenharGraficos(d) {
     svg += `<text class="rotulo-dir" x="${W - m.r + 20}" y="${r.y + 5}">${r.txt}</text>`;
   });
 
-  svg += `<line id="mira" x1="0" x2="0" y1="${m.t}" y2="${H - m.b}" stroke="var(--tinta-3)" stroke-width="1" visibility="hidden"/>`;
-  svg += `<circle id="mira-p" r="6" fill="none" stroke="var(--tinta)" stroke-width="2" visibility="hidden" shape-rendering="geometricPrecision"/>`;
+  // Mira: linha vertical e horizontal, anéis nos dois pontos e as etiquetas nos eixos.
+  svg += `<g id="mira-g" visibility="hidden">
+    <line id="mira" x1="0" x2="0" y1="${m.t}" y2="${H - m.b}" stroke="var(--tinta-3)" stroke-width="1"/>
+    <line id="mira-h" x1="${m.l}" x2="${W - m.r}" y1="0" y2="0" stroke="var(--tinta-3)" stroke-width="1" stroke-dasharray="3 3"/>
+    <circle id="mira-p" r="6" fill="none" stroke="var(--tinta)" stroke-width="2" shape-rendering="geometricPrecision"/>
+    <circle id="mira-a" r="6" fill="none" stroke="var(--serie-2)" stroke-width="2" shape-rendering="geometricPrecision"/>
+    <g id="mira-ey"><rect x="2" y="-9" width="${m.l - 6}" height="18" rx="3" fill="var(--tinta)"/><text class="etq" x="${m.l - 8}" y="4" text-anchor="end"></text></g>
+    <g id="mira-ex"><rect x="-44" y="${H - m.b + 2}" width="88" height="18" rx="3" fill="var(--tinta)"/><text class="etq" x="0" y="${H - 7}" text-anchor="middle"></text></g>
+  </g>`;
+  svg += `<rect id="g-sel" y="${m.t}" height="${H - m.t - m.b}" fill="var(--tinta)" opacity=".12" visibility="hidden"/>`;
   svg += `<rect class="alvo" x="${m.l}" y="0" width="${pw}" height="${H}" fill="transparent"/>`;
   gp.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Preço de ${esc(d.nome)} ao longo do tempo">${svg}</svg>`;
 
@@ -348,56 +408,250 @@ function desenharGraficos(d) {
   const maxU = Math.max(1, ...serie.map((s) => s.unidades));
   let sv = `<line x1="${m.l}" x2="${W - m.r}" y1="${HV - 2}" y2="${HV - 2}" stroke="var(--grade)"/>`;
   sv += `<text x="${m.l - 8}" y="14" text-anchor="end">${nf(0).format(maxU)}</text><text x="${m.l - 8}" y="${HV - 2}" text-anchor="end">0</text>`;
-  for (const s of serie) {
+  for (const mk of marcas) sv += `<line x1="${X(mk.t)}" x2="${X(mk.t)}" y1="4" y2="${HV - 2}" stroke="var(--grade)" ${mk.forte ? '' : 'stroke-dasharray="2 4"'}/>`;
+  serie.forEach((s, i) => {
     const xa = X(s.t) + 1, xb = X(Math.min(s.fim, x1)) - 1;
     const h = (s.unidades / maxU) * (HV - 8);
-    sv += `<rect x="${xa}" y="${HV - 2 - h}" width="${Math.max(2, xb - xa)}" height="${Math.max(1, h)}" fill="var(--serie-1)"/>`;
-  }
+    sv += `<rect data-i="${i}" x="${xa}" y="${HV - 2 - h}" width="${Math.max(2, xb - xa)}" height="${Math.max(1, h)}" fill="var(--serie-1)"/>`;
+  });
   sv += `<line id="mira-v" x1="0" x2="0" y1="0" y2="${HV}" stroke="var(--tinta-3)" visibility="hidden"/>`;
+  sv += `<rect id="g-sel-v" y="0" height="${HV}" fill="var(--tinta)" opacity=".12" visibility="hidden"/>`;
   sv += `<rect class="alvo" x="${m.l}" y="0" width="${pw}" height="${HV}" fill="transparent"/>`;
   gv.innerHTML = `<svg viewBox="0 0 ${W} ${HV}" height="${HV}" role="img" aria-label="Unidades vendidas por período">${sv}</svg>`;
 
   const buracos = trechos.length - 1;
-  $('#g-aviso').textContent = `Cada ponto = ${rotPasso(d.passo)}.` + (buracos > 0 ? ` A linha se interrompe onde não há coleta (${buracos} intervalo(s) sem dados).` : '');
+  $('#g-aviso').textContent = `Cada ponto = ${rotPasso(passo)}.` + (buracos > 0 ? ` A linha se interrompe onde ficou muito tempo sem venda (${buracos} intervalo(s)).` : '')
+    + (zoom?.carregando ? ' Carregando o trecho em detalhe…' : '');
 
-  // Hover: mira compartilhada pelos dois gráficos + tooltip.
-  const tip = $('#tooltip');
-  const mover = (ev) => {
-    const svgEl = ev.currentTarget.ownerSVGElement;
-    const r = svgEl.getBoundingClientRect();
-    const mx = ((ev.clientX - r.left) / r.width) * W;
-    const t = x0 + ((mx - m.l) / pw) * (x1 - x0);
-    let s = null, dist = Infinity;
-    for (const b of serie) { const dd = Math.abs((b.t + b.fim) / 2 - t); if (dd < dist) { dist = dd; s = b; } }
-    let a = null, da = Infinity;
-    for (const x of anun) { const dd = Math.abs(x.t - t); if (dd < da) { da = dd; a = x; } }
-    if (a && da > 90 * 60_000) a = null;
-    if (s && dist > d.passo * 1.5) s = null;
-    const xm = s ? centro(s) : a ? X(a.t) : mx;
-    for (const [id, vis] of [['#mira', 1], ['#mira-v', 1]]) {
-      const el = $(id); el.setAttribute('x1', xm); el.setAttribute('x2', xm); el.setAttribute('visibility', vis ? 'visible' : 'hidden');
+  graf.v = { d, W, H, m, pw, x0, x1, serie, anun, passo, X, Y, centro, moeda };
+  ligarGrafico();
+  if (graf.fixo != null) {
+    const i = serie.findIndex((s) => s.t === graf.fixo);
+    if (i >= 0) mostrarPonto(i, null); else graf.fixo = null;
+  }
+}
+
+// Barra acima do gráfico: a legenda (que liga e desliga séries) e os botões de zoom.
+function desenharBarraGrafico(d, zoom, passo) {
+  const sw = [
+    ['mediana', '<span class="sw" style="background:var(--serie-1)"></span>Mediana das vendas'],
+    ['faixa', '<span class="sw band" style="background:var(--serie-1)"></span>Faixa mín–máx'],
+    ['anuncio', '<span class="sw" style="background:var(--serie-2)"></span>Menor anúncio'],
+  ];
+  $('#g-legenda').innerHTML = sw.map(([k, h]) =>
+    `<button class="leg ${graf.ocultas.has(k) ? 'off' : ''}" data-serie="${k}" aria-pressed="${!graf.ocultas.has(k)}" title="mostrar ou esconder">${h}</button>`).join('');
+  const z = $('#g-zoom');
+  if (!zoom) {
+    z.innerHTML = '<span class="dica">arraste para dar zoom · clique fixa o ponto · ← → andam</span>';
+    return;
+  }
+  const r = zoom.resumo;
+  const quando = `${fDiaHora.format(zoom.de)} → ${fDiaHora.format(zoom.ate)}`;
+  const res = r ? ` · mediana <b>${fmtNum(r.mediana, d.moeda)}</b> · ${nf(0).format(r.vendas)} vendas · ${nf(0).format(r.unidades)} un.` : '';
+  z.innerHTML = `<span class="zoom-info">${quando}${res}</span>
+    <button class="chip" data-zoom="voltar" title="voltar ao zoom anterior">− zoom</button>
+    <button class="chip" data-zoom="tudo" title="ver a janela inteira">janela toda</button>`;
+}
+
+// Liga os eventos dos dois gráficos (o SVG é refeito a cada desenho, então religa sempre).
+function ligarGrafico() {
+  const v = graf.v;
+  const tParaX = (ev) => {
+    const r = ev.currentTarget.ownerSVGElement.getBoundingClientRect();
+    return ((ev.clientX - r.left) / r.width) * v.W;
+  };
+  const xParaT = (x) => v.x0 + ((Math.min(Math.max(x, v.m.l), v.m.l + v.pw) - v.m.l) / v.pw) * (v.x1 - v.x0);
+  let arrasto = null;
+  const sel = (a, b) => {
+    for (const id of ['#g-sel', '#g-sel-v']) {
+      const el = $(id);
+      if (a == null) { el.setAttribute('visibility', 'hidden'); continue; }
+      const xa = Math.max(v.m.l, Math.min(a, b)), xb = Math.min(v.m.l + v.pw, Math.max(a, b));
+      el.setAttribute('x', xa); el.setAttribute('width', Math.max(0, xb - xa)); el.setAttribute('visibility', 'visible');
     }
-    const p = $('#mira-p');
-    if (s) { p.setAttribute('cx', xm); p.setAttribute('cy', Y(s.mediana)); p.setAttribute('visibility', 'visible'); } else p.setAttribute('visibility', 'hidden');
-    let h = '';
-    if (s) {
-      h += `<div class="t">${fDiaHora.format(s.t)} – ${fHora.format(Math.min(s.fim, x1))}</div>`;
-      h += `<div><span class="sw" style="background:var(--serie-1)"></span>mediana <b>${fmtNum(s.mediana, moeda)}</b></div>`;
-      h += `<div>faixa <b>${fmtNum(s.min, moeda)} – ${fmtNum(s.max, moeda)}</b></div>`;
-      h += `<div>${nf(0).format(s.vendas)} vendas · ${nf(0).format(s.unidades)} un.</div>`;
-    } else h += `<div class="t">${fDiaHora.format(t)}</div><div>sem vendas aqui</div>`;
-    if (a) h += `<div><span class="sw" style="background:var(--serie-2)"></span>menor anúncio <b>${fmtNum(a.min, moeda)}</b> (${fHora.format(a.t)}, ${nf(0).format(a.anuncios)} anúncios)</div>`;
-    tip.innerHTML = h;
-    tip.classList.remove('hidden');
-    const tx = Math.min(ev.clientX + 16, innerWidth - tip.offsetWidth - 8);
-    const ty = Math.min(ev.clientY + 16, innerHeight - tip.offsetHeight - 8);
-    tip.style.left = tx + 'px'; tip.style.top = ty + 'px';
   };
-  const sair = () => {
-    tip.classList.add('hidden');
-    ['#mira', '#mira-v', '#mira-p'].forEach((id) => $(id)?.setAttribute('visibility', 'hidden'));
+  $$('.grafico .alvo').forEach((el) => {
+    el.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0) return;
+      el.setPointerCapture(ev.pointerId);
+      arrasto = { x: tParaX(ev), andou: false };
+    });
+    el.addEventListener('pointermove', (ev) => {
+      const x = tParaX(ev);
+      if (arrasto) {
+        if (Math.abs(x - arrasto.x) > 5) arrasto.andou = true;
+        if (arrasto.andou) { sel(arrasto.x, x); esconderMira(); return; }
+      }
+      if (graf.fixo == null) mostrarPonto(pontoMaisPerto(xParaT(x)), ev, xParaT(x));
+    });
+    el.addEventListener('pointerup', (ev) => {
+      if (!arrasto) return;
+      const x = tParaX(ev), a = arrasto;
+      arrasto = null;
+      sel(null);
+      if (a.andou && Math.abs(x - a.x) > 8) { darZoom(xParaT(Math.min(a.x, x)), xParaT(Math.max(a.x, x))); return; }
+      // Clique: fixa o ponto (ou solta, se for o mesmo).
+      const i = pontoMaisPerto(xParaT(x));
+      if (i == null) return;
+      if (graf.fixo === v.serie[i].t) { graf.fixo = null; mostrarPonto(i, ev); } else { graf.fixo = v.serie[i].t; mostrarPonto(i, null); }
+    });
+    el.addEventListener('pointercancel', () => { arrasto = null; sel(null); });
+    el.addEventListener('mouseleave', () => { if (graf.fixo == null && !arrasto) esconderMira(); });
+  });
+}
+
+function pontoMaisPerto(t) {
+  const v = graf.v;
+  let i = null, dist = Infinity;
+  v.serie.forEach((b, k) => { const dd = Math.abs((Math.max(b.t, v.x0) + Math.min(b.fim, v.x1)) / 2 - t); if (dd < dist) { dist = dd; i = k; } });
+  return i != null && dist <= v.passo * 1.5 ? i : null;
+}
+
+function esconderMira() {
+  $('#tooltip').classList.add('hidden');
+  $('#mira-g')?.setAttribute('visibility', 'hidden');
+  $('#mira-v')?.setAttribute('visibility', 'hidden');
+  $$('#g-vol rect.ativo').forEach((r) => r.classList.remove('ativo'));
+}
+
+// Mostra o balde i (ou só o anúncio mais perto de t, se não há venda ali).
+// ev = evento do mouse (o tooltip segue o cursor); null = ponto fixado (o tooltip fica no ponto).
+function mostrarPonto(i, ev, t) {
+  const v = graf.v, moeda = v.moeda;
+  const s = i != null ? v.serie[i] : null;
+  const tRef = s ? (s.t + s.fim) / 2 : t;
+  if (tRef == null) return esconderMira();
+  let a = null, da = Infinity;
+  for (const x of v.anun) { const dd = Math.abs(x.t - tRef); if (dd < da) { da = dd; a = x; } }
+  if (a && da > Math.max(90 * 60_000, v.passo)) a = null;
+  if (!s && !a) {
+    if (ev) { esconderMira(); }
+    return;
+  }
+  const xm = s ? v.centro(s) : v.X(a.t);
+  const ym = s ? v.Y(s.mediana) : v.Y(a.min);
+  $('#mira-g').setAttribute('visibility', 'visible');
+  for (const id of ['#mira', '#mira-v']) { const el = $(id); el.setAttribute('x1', xm); el.setAttribute('x2', xm); el.setAttribute('visibility', 'visible'); }
+  const mh = $('#mira-h'); mh.setAttribute('y1', ym); mh.setAttribute('y2', ym);
+  const p = $('#mira-p'), pa = $('#mira-a');
+  p.setAttribute('visibility', s ? 'inherit' : 'hidden');
+  if (s) { p.setAttribute('cx', xm); p.setAttribute('cy', ym); }
+  pa.setAttribute('visibility', a && !graf.ocultas.has('anuncio') ? 'inherit' : 'hidden');
+  if (a) { pa.setAttribute('cx', v.X(a.t)); pa.setAttribute('cy', v.Y(a.min)); }
+  const ey = $('#mira-ey'); ey.setAttribute('transform', `translate(0 ${ym})`);
+  ey.querySelector('text').textContent = fmtNum(s ? s.mediana : a.min, moeda);
+  const ex = $('#mira-ex');
+  const xe = Math.min(Math.max(xm, v.m.l + 44), v.W - v.m.r + 40);
+  ex.setAttribute('transform', `translate(${xe} 0)`);
+  ex.querySelector('text').textContent = fDiaHora.format(s ? s.t : a.t);
+  $$('#g-vol rect.ativo').forEach((r) => r.classList.remove('ativo'));
+  if (s) $(`#g-vol rect[data-i="${i}"]`)?.classList.add('ativo');
+
+  let h = '';
+  if (s) {
+    const ant = i > 0 ? v.serie[i - 1] : null;
+    const varr = ant && ant.mediana ? (s.mediana / ant.mediana - 1) * 100 : null;
+    h += `<div class="t">${fDiaHora.format(s.t)} – ${fHora.format(Math.min(s.fim, v.x1))}${graf.fixo === s.t ? ' <span class="fixo">fixado</span>' : ''}</div>`;
+    h += `<div><span class="sw" style="background:var(--serie-1)"></span>mediana <b>${fmtNum(s.mediana, moeda)}</b>`
+      + (varr != null && Math.abs(varr) >= 0.05 ? ` <span class="var ${varr > 0 ? 'sobe' : 'desce'}">${varr > 0 ? '▲' : '▼'} ${nf(1).format(Math.abs(varr))}%</span>` : '') + '</div>';
+    h += `<div>faixa <b>${fmtNum(s.min, moeda)} – ${fmtNum(s.max, moeda)}</b></div>`;
+    h += `<div>${nf(0).format(s.vendas)} vendas · ${nf(0).format(s.unidades)} un.</div>`;
+  } else h += `<div class="t">${fDiaHora.format(a.t)}</div><div>sem vendas aqui</div>`;
+  if (a) {
+    const dif = s && s.mediana ? (a.min / s.mediana - 1) * 100 : null;
+    h += `<div><span class="sw" style="background:var(--serie-2)"></span>menor anúncio <b>${fmtNum(a.min, moeda)}</b>`
+      + (dif != null ? ` (${dif >= 0 ? '+' : '−'}${nf(0).format(Math.abs(dif))}% da mediana)` : '') + '</div>';
+    h += `<div class="sub">foto das ${fHora.format(a.t)}, ${nf(0).format(a.anuncios)} anúncios</div>`;
+  }
+  if (graf.fixo == null && s) h += '<div class="sub">clique para fixar</div>';
+  const tip = $('#tooltip');
+  tip.innerHTML = h;
+  tip.classList.remove('hidden');
+  let cx, cy;
+  if (ev) { cx = ev.clientX; cy = ev.clientY; } else {
+    const r = $('#g-preco svg').getBoundingClientRect();
+    cx = r.left + (xm / v.W) * r.width; cy = r.top + (ym / v.H) * r.height;
+  }
+  // O tooltip vai para o lado com mais espaço, para não cobrir o ponto.
+  // Ponto fixado: acima do ponto, quando cabe, para não cobrir o eixo do tempo.
+  let tx = cx + 16;
+  if (tx + tip.offsetWidth > innerWidth - 8) tx = cx - 16 - tip.offsetWidth;
+  let ty = !ev && cy - tip.offsetHeight - 16 > 8 ? cy - tip.offsetHeight - 16 : cy + 16;
+  ty = Math.min(Math.max(8, ty), innerHeight - tip.offsetHeight - 8);
+  tip.style.left = Math.max(8, tx) + 'px'; tip.style.top = ty + 'px';
+}
+
+async function darZoom(de, ate) {
+  const d = estado.ultimoItem;
+  if (!d) return;
+  const MIN = 3600_000;
+  if (ate - de < MIN) { const c = (de + ate) / 2; de = c - MIN / 2; ate = c + MIN / 2; }
+  ate = Math.min(ate, d.agora); de = Math.max(de, d.inicio);
+  if (ate - de < MIN) de = ate - MIN;
+  de = Math.round(de); ate = Math.round(ate);
+  // Desenha já com os pontos que temos; o servidor manda os baldes finos logo em seguida.
+  const atual = vistaGrafico(d);
+  const z = {
+    de, ate, passo: atual.passo, carregando: true, resumo: null,
+    serie: atual.serie.filter((s) => s.fim > de && s.t < ate),
+    anuncios: atual.anun.filter((a) => a.t >= de && a.t <= ate),
   };
-  $$('.alvo').forEach((el) => { el.addEventListener('mousemove', mover); el.addEventListener('mouseleave', sair); });
+  graf.pilha.push(z);
+  graf.fixo = null;
+  esconderMira();
+  desenharGraficos(d);
+  try {
+    const r = await api('/api/item/serie', { nome: d.nome, moeda: d.moeda, janela: d.janela, de, ate });
+    Object.assign(z, { passo: r.passo, serie: r.serie, anuncios: r.anuncios, resumo: r.resumo, carregando: false });
+  } catch (e) {
+    z.carregando = false;
+  }
+  if (estado.ultimoItem === d && graf.pilha[graf.pilha.length - 1] === z) desenharGraficos(d);
+}
+
+function voltarZoom(tudo) {
+  if (!graf.pilha.length || !estado.ultimoItem) return;
+  if (tudo) graf.pilha = []; else graf.pilha.pop();
+  graf.fixo = null;
+  esconderMira();
+  desenharGraficos(estado.ultimoItem);
+}
+
+// Eventos que não dependem do SVG (ligados uma vez, por delegação no #detalhe).
+function ligarControlesGrafico() {
+  lerLocal('graf_ocultas').split(',').filter((k) => ['mediana', 'faixa', 'anuncio'].includes(k)).forEach((k) => graf.ocultas.add(k));
+  if (graf.ocultas.size === 3) graf.ocultas.clear();
+  $('#detalhe').addEventListener('click', (e) => {
+    const leg = e.target.closest('[data-serie]');
+    if (leg) {
+      const k = leg.dataset.serie;
+      if (graf.ocultas.has(k)) graf.ocultas.delete(k); else graf.ocultas.add(k);
+      if (graf.ocultas.size === 3) graf.ocultas.delete(k); // pelo menos uma série fica
+      gravarLocal('graf_ocultas', [...graf.ocultas].join(','));
+      if (estado.ultimoItem) desenharGraficos(estado.ultimoItem);
+      return;
+    }
+    const z = e.target.closest('[data-zoom]');
+    if (z) voltarZoom(z.dataset.zoom === 'tudo');
+  });
+  $('#detalhe').addEventListener('dblclick', (e) => { if (e.target.closest('.grafico')) voltarZoom(false); });
+  $('#detalhe').addEventListener('keydown', (e) => {
+    if (!e.target.closest('.grafico-box') || !graf.v) return;
+    const v = graf.v, n = v.serie.length;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      if (!n) return;
+      e.preventDefault();
+      let i = v.serie.findIndex((s) => s.t === graf.fixo);
+      if (i < 0) i = e.key === 'ArrowLeft' ? n : -1;
+      i = Math.min(n - 1, Math.max(0, i + (e.key === 'ArrowLeft' ? -1 : 1)));
+      graf.fixo = v.serie[i].t;
+      mostrarPonto(i, null);
+    } else if (e.key === 'Escape') {
+      if (graf.fixo != null) { graf.fixo = null; esconderMira(); } else voltarZoom(false);
+    } else if (e.key === '-' || e.key === 'Backspace') {
+      e.preventDefault(); voltarZoom(false);
+    }
+  });
 }
 
 const rotPasso = (ms) => {
@@ -1213,6 +1467,7 @@ function mostrarAba(aba) {
 
 function ligar() {
   pintarIcones();
+  ligarControlesGrafico();
   ligarSinais();
   ligarSom();
   ligarPokemon();

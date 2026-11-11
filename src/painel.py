@@ -225,19 +225,68 @@ def api_resumo(con, moeda: str) -> dict:
     return {"moeda": moeda, "itens": itens, "agora": t}
 
 
-def api_item(con, nome: str, moeda: str, janela: str) -> dict:
-    t = agora_ms()
-    dur = JANELAS.get(janela, 7 * DIA)
+PASSOS_GRAFICO = (5 * 60_000, 10 * 60_000, 15 * 60_000, 30 * 60_000, HORA, 3 * HORA, 6 * HORA, 12 * HORA, DIA, 7 * DIA)
+MAX_BALDES = 120
+ZOOM_MINIMO = HORA  # o zoom não fica menor que 1 h (com baldes de 5 min, são 12 pontos)
+
+
+def _vendas_janela(con, nome: str, moeda: str, dur, t: int):
+    """Vendas do item na janela e o filtro de suspeitas (pela mediana da janela inteira)."""
     filtro, args = "kind='item' AND currency=? AND base_name=?", [moeda, nome]
     if dur:
         filtro += " AND ts >= ?"
         args.append(ts_de_ms(t - dur))
     linhas = [(ms_da_linha(r["ts"], r["ts_ms"]), r) for r in con.execute(
         f"SELECT * FROM trades WHERE {filtro} ORDER BY ts", args)]
-    precos = [r["unit_price"] for _, r in linhas]
-    m_janela = mediana(precos)
+    m_janela = mediana([r["unit_price"] for _, r in linhas])
     lo, hi = (m_janela / FATOR_OUTLIER, m_janela * FATOR_OUTLIER) if m_janela else (0, float("inf"))
-    normal = lambda p: lo <= p <= hi  # noqa: E731
+    return linhas, (lambda p: lo <= p <= hi)
+
+
+def _baldes(bons, ini: int, fim: int):
+    """Agrupa as vendas de [ini, fim] em até MAX_BALDES baldes.
+
+    Os baldes começam em horas redondas do horário de Brasília (14:00–14:15, não 14:07–14:22),
+    para o tooltip e o eixo baterem com o relógio."""
+    span = max(fim - ini, 1)
+    passo = next((p for p in PASSOS_GRAFICO if span / p <= MAX_BALDES), PASSOS_GRAFICO[-1])
+    desloc = int(importer.BRT.utcoffset(None).total_seconds() * 1000)  # -3 h
+    baldes: dict[int, list] = defaultdict(list)
+    for ms, r in bons:
+        if ini <= ms <= fim:
+            baldes[(ms + desloc) // passo].append(r)
+    serie = []
+    for k in sorted(baldes):
+        rs = baldes[k]
+        ps = [r["unit_price"] for r in rs]
+        t0 = k * passo - desloc
+        serie.append({"t": t0, "fim": t0 + passo, "mediana": mediana(ps),
+                      "min": min(ps), "max": max(ps), "vendas": len(rs), "unidades": sum(r["qty"] for r in rs)})
+    return passo, serie
+
+
+def _anuncios(con, nome: str, moeda: str, de, ate=None):
+    """Menor anúncio da vitrine em cada foto, de `de` até `ate` (ms)."""
+    vit_id = con.execute("SELECT id FROM itens WHERE nome = ?", (nome,)).fetchone()
+    if not vit_id:
+        return []
+    col = "min_gems" if moeda == "gems" else "min_coins"
+    q = f"SELECT snap_ms, {col} AS v, anuncios FROM vitrine WHERE item_id = ?"
+    args = [vit_id[0]]
+    if de:
+        q += " AND snap_ms >= ?"
+        args.append(de)
+    if ate:
+        q += " AND snap_ms <= ?"
+        args.append(ate)
+    return [{"t": r["snap_ms"], "min": r["v"], "anuncios": r["anuncios"]}
+            for r in con.execute(q + " ORDER BY snap_ms", args)]
+
+
+def api_item(con, nome: str, moeda: str, janela: str) -> dict:
+    t = agora_ms()
+    dur = JANELAS.get(janela, 7 * DIA)
+    linhas, normal = _vendas_janela(con, nome, moeda, dur, t)
     bons = [(ms, r) for ms, r in linhas if normal(r["unit_price"])]
     pb = sorted(r["unit_price"] for _, r in bons)
     unidades = sum(r["qty"] for _, r in bons)
@@ -248,30 +297,8 @@ def api_item(con, nome: str, moeda: str, janela: str) -> dict:
     if linhas and linhas[0][0] > ini:
         ini = max(ini, linhas[0][0] - (t - linhas[0][0]) * 0.04)
     ini = int(ini)
-    span = max(t - ini, HORA)
-    passo = next(p for p in (15 * 60_000, 30 * 60_000, HORA, 3 * HORA, 6 * HORA, 12 * HORA, DIA, 7 * DIA)
-                 if span / p <= 120)
-    baldes: dict[int, list] = defaultdict(list)
-    for ms, r in bons:
-        baldes[(ms - ini) // passo].append(r)
-    serie = []
-    for k in sorted(baldes):
-        rs = baldes[k]
-        ps = [r["unit_price"] for r in rs]
-        serie.append({"t": ini + k * passo, "fim": ini + (k + 1) * passo, "mediana": mediana(ps),
-                      "min": min(ps), "max": max(ps), "vendas": len(rs), "unidades": sum(r["qty"] for r in rs)})
-
-    vit_id = con.execute("SELECT id FROM itens WHERE nome = ?", (nome,)).fetchone()
-    anuncios = []
-    if vit_id:
-        col = "min_gems" if moeda == "gems" else "min_coins"
-        q = f"SELECT snap_ms, {col} AS v, anuncios FROM vitrine WHERE item_id = ?"
-        a2 = [vit_id[0]]
-        if dur:
-            q += " AND snap_ms >= ?"
-            a2.append(t - dur)
-        anuncios = [{"t": r["snap_ms"], "min": r["v"], "anuncios": r["anuncios"]}
-                    for r in con.execute(q + " ORDER BY snap_ms", a2)]
+    passo, serie = _baldes(bons, ini, max(t, ini + HORA))
+    anuncios = _anuncios(con, nome, moeda, (t - dur) if dur else None)
     vit = vitrine_atual(con).get(nome, {})
 
     recentes = [{"t": ms, "qtd": r["qty"], "unit": r["unit_price"], "total": r["total"],
@@ -294,6 +321,25 @@ def api_item(con, nome: str, moeda: str, janela: str) -> dict:
                     "snap_ms": vit.get("snap_ms")},
         "recentes": recentes,
         "taxa": TAXA_ITEM, "usd_por_gema": USD_POR_GEMA,
+    }
+
+
+def api_item_serie(con, nome: str, moeda: str, janela: str, de: int, ate: int) -> dict:
+    """Zoom do gráfico: a série de [de, ate] com baldes mais finos e o resumo do trecho.
+
+    As suspeitas seguem a mediana da janela inteira, para o zoom bater com o gráfico de fora."""
+    t = agora_ms()
+    ate = min(ate or t, t)
+    de = min(de, ate - ZOOM_MINIMO)
+    linhas, normal = _vendas_janela(con, nome, moeda, JANELAS.get(janela, 7 * DIA), t)
+    bons = [(ms, r) for ms, r in linhas if normal(r["unit_price"]) and de <= ms <= ate]
+    passo, serie = _baldes(bons, de, ate)
+    pb = sorted(r["unit_price"] for _, r in bons)
+    return {
+        "nome": nome, "moeda": moeda, "de": de, "ate": ate, "passo": passo,
+        "serie": serie, "anuncios": _anuncios(con, nome, moeda, de, ate),
+        "resumo": {"vendas": len(bons), "unidades": sum(r["qty"] for _, r in bons), "mediana": mediana(pb),
+                   "min": pb[0] if pb else None, "max": pb[-1] if pb else None},
     }
 
 
@@ -449,6 +495,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(api_resumo(con, moeda))
                 if url.path == "/api/item":
                     return self._json(api_item(con, q.get("nome", ""), moeda, q.get("janela", "7d")))
+                if url.path == "/api/item/serie":
+                    return self._json(api_item_serie(con, q.get("nome", ""), moeda, q.get("janela", "7d"),
+                                                     int(float(q.get("de", 0))), int(float(q.get("ate", 0)))))
                 if url.path == "/api/montagem":
                     return self._json(api_montagem(con))
                 if url.path == "/api/pokemon":

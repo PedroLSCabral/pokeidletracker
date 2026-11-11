@@ -308,12 +308,13 @@ input[type="checkbox"]:focus-visible { outline: 2px solid var(--rx-rosa); outlin
 .tile .det { font-size: 11.5px; color: var(--tinta-3); }
 
 .grafico-box { padding: 10px 6px 6px; position: relative; }
-.legenda { display: flex; gap: 16px; flex-wrap: wrap; padding: 0 8px 6px; font-size: 12px; color: var(--tinta-2); }
+.legenda { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 4px 6px; font-size: 12px; color: var(--tinta-2); }
 .legenda .sw { display: inline-block; width: 14px; height: 4px; border-radius: 2px; vertical-align: 3px; margin-right: 6px; }
 .legenda .sw.band { height: 10px; vertical-align: 0; opacity: .35; }
 .grafico svg { display: block; width: 100%; shape-rendering: crispEdges; }
 .grafico text { font: 11px var(--f-texto); fill: var(--tinta-3); }
 .grafico .rotulo-dir { fill: var(--tinta); font: 700 11.5px var(--f-titulo); }
+.grafico text.forte { fill: var(--tinta-2); font-weight: 700; }
 .titulo-mini { font: 700 10.5px var(--f-titulo); letter-spacing: .5px; text-transform: uppercase; color: var(--tinta-3); padding: 8px 8px 0; }
 .aviso { font-size: 12px; color: var(--tinta-3); padding: 4px 8px; }
 
@@ -457,3 +458,22 @@ input[type="checkbox"]:focus-visible { outline: 2px solid var(--rx-rosa); outlin
 #pvp-corpo .caixa p.aviso { font-size: 12px; color: var(--tinta-3); padding: 0; }
 #pvp-corpo .desce { color: var(--desce); }
 #pvp-corpo > .tiles { margin-top: 10px; }
+
+/* ---------- leitura do gráfico (legenda clicável, zoom, mira) ---------- */
+.grafico-box:focus-visible { outline: 2px solid var(--tinta-3); outline-offset: 2px; }
+.barra-grafico { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+.legenda .leg {
+  background: none; border: 0; border-radius: 4px; padding: 3px 6px; cursor: pointer;
+  font: inherit; color: inherit;
+}
+.legenda .leg:hover { background: var(--grade); }
+.legenda .leg.off { opacity: .45; text-decoration: line-through; }
+.zoom { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; padding: 0 4px 6px; font-size: 12px; color: var(--tinta-3); }
+.zoom .zoom-info b { color: var(--tinta); }
+.zoom .dica { font-style: italic; }
+.grafico .alvo { cursor: crosshair; touch-action: none; }
+.grafico text.etq { fill: var(--linha); font: 700 11px var(--f-titulo); }
+.grafico rect.ativo { fill: var(--tinta); }
+.tooltip .sub { font-size: 11.5px; color: var(--tinta-3); }
+.tooltip .fixo { font: 700 10px var(--f-titulo); color: var(--linha); background: var(--tinta-3); border-radius: 3px; padding: 0 4px; margin-left: 4px; }
+.tooltip .var { font: 700 11px var(--f-titulo); }

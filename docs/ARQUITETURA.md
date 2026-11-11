@@ -278,6 +278,7 @@ Todas as rotas GET aceitam `moeda=gems|coins` (o padrão é gems).
 |---|---|---|
 | `GET /api/resumo` | `api_resumo` | Lista do mercado: mediana atual, variação de 24 h e 7 d, vendas de 24 h, menor anúncio e mini gráfico de 7 dias |
 | `GET /api/item?nome=&janela=24h\|7d\|30d\|tudo` | `api_item` | Detalhe: estatísticas, série do gráfico (baldes), menor anúncio no tempo, vitrine e últimas vendas |
+| `GET /api/item/serie?nome=&janela=&de=&ate=` | `api_item_serie` | Zoom do gráfico: a série de `[de, ate]` (ms) com baldes mais finos (até 5 min), o menor anúncio no trecho e o resumo (mediana, vendas, unidades). As suspeitas seguem a mediana da janela inteira |
 | `GET /api/montagem` | `api_montagem` | Fragmentos × casa/bicicleta pronta (valor esperado por raridade) |
 | `GET /api/venda?nome=&qtd=` | `api_venda` → `venda.analisar` | Botão vender: moeda, preços, momento e montagem |
 | `GET /api/sinais` | `api_sinais` → `sinais.calcular` | Revenda, barato/caro, regras, log de alertas e canais |
@@ -435,7 +436,13 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   - **formatação:** `fmtNum`, `htmlPreco`, `htmlVar`, `usd`, `classeRaridade` e `api()`, o fetch que lança erro com a mensagem do servidor;
   - **estado na URL:** `lerHash` e `gravarHash`. Aba, moeda, janela, categoria e item ficam no `#`;
   - **lista e detalhe:** `carregarResumo`, `desenharLista` (cada linha tem um botão `[data-vender]`), `selecionar`, `desenharDetalhe`, `ligarCalculadora`;
-  - **gráfico:** `desenharGraficos`, em SVG próprio, com mira e tooltip;
+  - **gráfico:** `desenharGraficos`, em SVG próprio. O estado fica em `graf` (pilha de zooms, ponto fixado, séries escondidas) e zera ao trocar item, moeda ou janela:
+    - arrastar faz zoom (`darZoom`): desenha na hora com os baldes que já tem e troca pelos de `/api/item/serie`; `− zoom`, duplo clique, `-` ou Esc voltam (`voltarZoom`);
+    - a mira (`mostrarPonto`) gruda no balde mais perto, com linha vertical e horizontal, anéis na mediana e no menor anúncio e etiquetas nos eixos; o tooltip traz a variação contra o balde anterior e a distância do anúncio para a mediana;
+    - clique fixa o ponto, ← → andam de balde em balde (o `.grafico-box` tem foco), Esc solta;
+    - a legenda é clicável e esconde séries (lembradas em `graf_ocultas` no `localStorage`); a escala de preço só olha o que está visível;
+    - o eixo do tempo marca horas redondas de Brasília (`marcasTempo`), com a meia-noite mais forte; o servidor alinha os baldes do mesmo jeito (`_baldes`);
+    - a linha da mediana só quebra depois de 3 h sem venda (ou de um balde vazio, se o balde for maior);
   - **montagem:** `carregarMontagem`;
   - **vender:** `abrirVenda`, `desenharVenda`, `ligarVenda` e o estado em `venda`;
   - **sinais:** `carregarSinais`, `desenharSinais`, `ligarSinais`; `postar()` para os POST;
