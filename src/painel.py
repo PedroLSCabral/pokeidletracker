@@ -265,8 +265,8 @@ def _baldes(bons, ini: int, fim: int):
     return passo, serie
 
 
-def _anuncios(con, nome: str, moeda: str, de, ate=None):
-    """Menor anúncio da vitrine em cada foto, de `de` até `ate` (ms)."""
+def _anuncios(con, nome: str, moeda: str, de, ate=None, passo=None):
+    """Menor anúncio da vitrine em cada foto, de `de` até `ate` (ms), reduzido ao ritmo dos baldes."""
     vit_id = con.execute("SELECT id FROM itens WHERE nome = ?", (nome,)).fetchone()
     if not vit_id:
         return []
@@ -279,8 +279,23 @@ def _anuncios(con, nome: str, moeda: str, de, ate=None):
     if ate:
         q += " AND snap_ms <= ?"
         args.append(ate)
-    return [{"t": r["snap_ms"], "min": r["v"], "anuncios": r["anuncios"]}
-            for r in con.execute(q + " ORDER BY snap_ms", args)]
+    fotos = [{"t": r["snap_ms"], "min": r["v"], "anuncios": r["anuncios"]}
+             for r in con.execute(q + " ORDER BY snap_ms", args)]
+    if not passo or len(fotos) <= 2 * MAX_BALDES:
+        return fotos
+    # Muitas fotos (a vitrine é lida a cada poucos minutos): uma por meio balde, a de valor mediano.
+    # É sempre uma foto real (o tooltip mostra o horário dela) e não puxa a linha para os extremos.
+    meio = max(passo // 2, 1)
+    desloc = int(importer.BRT.utcoffset(None).total_seconds() * 1000)
+    grupos: dict[int, list] = defaultdict(list)
+    for f in fotos:
+        grupos[(f["t"] + desloc) // meio].append(f)
+    out = []
+    for k in sorted(grupos):
+        g = grupos[k]
+        com = sorted((f for f in g if f["min"] is not None), key=lambda f: f["min"])
+        out.append(com[(len(com) - 1) // 2] if com else g[-1])
+    return out
 
 
 def api_item(con, nome: str, moeda: str, janela: str) -> dict:
@@ -298,7 +313,7 @@ def api_item(con, nome: str, moeda: str, janela: str) -> dict:
         ini = max(ini, linhas[0][0] - (t - linhas[0][0]) * 0.04)
     ini = int(ini)
     passo, serie = _baldes(bons, ini, max(t, ini + HORA))
-    anuncios = _anuncios(con, nome, moeda, (t - dur) if dur else None)
+    anuncios = _anuncios(con, nome, moeda, (t - dur) if dur else None, passo=passo)
     vit = vitrine_atual(con).get(nome, {})
 
     recentes = [{"t": ms, "qtd": r["qty"], "unit": r["unit_price"], "total": r["total"],
@@ -337,7 +352,7 @@ def api_item_serie(con, nome: str, moeda: str, janela: str, de: int, ate: int) -
     pb = sorted(r["unit_price"] for _, r in bons)
     return {
         "nome": nome, "moeda": moeda, "de": de, "ate": ate, "passo": passo,
-        "serie": serie, "anuncios": _anuncios(con, nome, moeda, de, ate),
+        "serie": serie, "anuncios": _anuncios(con, nome, moeda, de, ate, passo),
         "resumo": {"vendas": len(bons), "unidades": sum(r["qty"] for _, r in bons), "mediana": mediana(pb),
                    "min": pb[0] if pb else None, "max": pb[-1] if pb else None},
     }

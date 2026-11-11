@@ -443,6 +443,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
     - a legenda é clicável e esconde séries (lembradas em `graf_ocultas` no `localStorage`); a escala de preço só olha o que está visível;
     - o eixo do tempo marca horas redondas de Brasília (`marcasTempo`), com a meia-noite mais forte; o servidor alinha os baldes do mesmo jeito (`_baldes`);
     - a linha da mediana só quebra depois de 3 h sem venda (ou de um balde vazio, se o balde for maior);
+    - com mais de 240 fotos da vitrine, o servidor (`_anuncios`) manda uma por meio balde, a de valor mediano;
   - **montagem:** `carregarMontagem`;
   - **vender:** `abrirVenda`, `desenharVenda`, `ligarVenda` e o estado em `venda`;
   - **sinais:** `carregarSinais`, `desenharSinais`, `ligarSinais`; `postar()` para os POST;
