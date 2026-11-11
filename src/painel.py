@@ -548,7 +548,8 @@ class Handler(BaseHTTPRequestHandler):
                 if url.path == "/api/pvp":
                     orc = float(q["orcamento"]) if q.get("orcamento", "").strip() else None
                     return self._json(pvp.analisar(con, q.get("nick", "")[:20], q.get("faixa", "")[:12], orc,
-                                                   q.get("moeda") if q.get("moeda") in ("gems", "coins") else "gems"))
+                                                   q.get("moeda") if q.get("moeda") in ("gems", "coins") else "gems",
+                                                   forcar=q.get("forcar") == "1"))
                 if url.path == "/api/venda":
                     return self._json(api_venda(con, q.get("nome", "").strip()[:80], min(max(int(q.get("qtd", 1) or 1), 1), 1_000_000)))
                 if url.path == "/api/alertas/novos":

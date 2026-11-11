@@ -1097,28 +1097,39 @@ const pct = (v) => (v == null ? '—' : nf(1).format(v * 100) + '%');
 const lerLocal = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 const gravarLocal = (k, v) => { try { localStorage.setItem(k, v); } catch { /* sem armazenamento: só não lembra */ } };
 
-async function analisarPvp(e) {
+async function analisarPvp(e, forcar = false) {
   e?.preventDefault();
   const nick = $('#pvp-nick').value.trim();
-  if (!nick) return;
+  if (!nick) { $('#pvp-nick').reportValidity(); return; }
   gravarLocal('pvp_nick', nick);
-  $('#pvp-corpo').innerHTML = '<div class="vazio">Lendo o Tracker do jogo… (a primeira vez leva uns 30 s)</div>';
+  const botoes = document.querySelectorAll('#pvp-form button');
+  botoes.forEach((b) => { b.disabled = true; });
+  $('#pvp-corpo').innerHTML = `<div class="vazio">${forcar ? 'Lendo de novo o seu perfil e o meta no Tracker…' : 'Lendo o Tracker do jogo… (a primeira vez leva uns 30 s)'}</div>`;
   let d;
   try {
-    d = await api('/api/pvp', { nick, faixa: $('#pvp-faixa').value, orcamento: $('#pvp-orc').value, moeda: $('#pvp-moeda').value });
+    d = await api('/api/pvp', { nick, faixa: $('#pvp-faixa').value, orcamento: $('#pvp-orc').value, moeda: $('#pvp-moeda').value,
+      forcar: forcar ? 1 : '' });
   } catch (err) {
     $('#pvp-corpo').innerHTML = `<div class="vazio">Não deu: ${esc(err.message)}</div>`;
     return;
+  } finally {
+    botoes.forEach((b) => { b.disabled = false; });
   }
   estado.pvp = d;
   desenharPvp();
+}
+
+// "agora", "há 3 min", "há 2 h" a partir de um instante em ms.
+function haQuanto(ms) {
+  const min = Math.max(0, Math.round((Date.now() - ms) / 60000));
+  return min < 1 ? 'agora' : min < 60 ? `há ${min} min` : `há ${Math.round(min / 60)} h`;
 }
 
 function desenharPvp() {
   const d = estado.pvp;
   if (!d) return;
   const r = d.rank || {}, t = d.totais || {}, m = d.moeda;
-  $('#pvp-sub').textContent = `${d.nick} · temporada ${d.temporada || '—'} · meta de ${NOME_FAIXA[d.faixa] || d.faixa}${d.velho ? ' · dados guardados (o Tracker não respondeu)' : ''}`;
+  $('#pvp-sub').textContent = `${d.nick} · temporada ${d.temporada || '—'} · meta de ${NOME_FAIXA[d.faixa] || d.faixa}${d.lido_em ? ` · perfil lido ${haQuanto(d.lido_em)}` : ''}${d.meta_lido_em ? `, meta ${haQuanto(d.meta_lido_em)}` : ''}${d.velho ? ' · dados guardados (o Tracker não respondeu)' : ''}`;
   const tiles = `
     <div class="tiles">
       <div class="tile"><div class="rot">Rank</div><div class="val">${esc(NOME_TIER[r.tierId] || r.tierId || '—')}</div><div class="det">${r.pontos != null ? nf(0).format(r.pontos) + ' PR' : 'sem partidas ranqueadas'}${r.posicao ? ` · #${nf(0).format(r.posicao)}` : ''}</div></div>
@@ -1205,6 +1216,7 @@ function desenharPvp() {
 function ligarPvp() {
   $('#pvp-nick').value = lerLocal('pvp_nick');
   $('#pvp-form').addEventListener('submit', analisarPvp);
+  $('#pvp-forcar').addEventListener('click', () => analisarPvp(null, true));
   $('#pvp-corpo').addEventListener('change', (e) => { if (e.target.id === 'pvp-soloja') desenharPvp(); });
 }
 

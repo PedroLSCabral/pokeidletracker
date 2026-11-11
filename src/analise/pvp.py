@@ -33,6 +33,7 @@ PAUSA_S = 1.5
 TTL_S = {"jogador": 5 * 60, "partidas": 5 * 60, "pokemon": 12 * 3600, "meta": 6 * 3600,
          "ladder": 6 * 3600, "inicio": 6 * 3600}
 TTL_OUTRO_JOGADOR_S = 6 * 3600     # o perfil de quem está no topo muda pouco: 6 h de cache
+TTL_FORCADO_S = 60                 # "Atualizar agora": só pede de novo o que tem mais de 1 min (cliques seguidos usam o cache)
 FAIXAS = ("todas", "baixo", "alto", "bronze", "prata", "ouro", "platina", "diamante", "mestre")
 TIER_PARA_FAIXA = {"bronze": "bronze", "prata": "prata", "ouro": "ouro", "platina": "platina",
                    "diamante": "diamante", "mestre": "mestre", "graomestre": "mestre", "challenger": "mestre"}
@@ -117,16 +118,19 @@ def preparar(con) -> None:
     con.executescript(SCHEMA)
 
 
-def tracker(con, rota: str, ttl_s: float | None = None, **params) -> dict:
-    """GET /tracker/api/<rota>, com cache no banco. Se o site falhar e houver uma cópia velha, usa a velha."""
+def tracker(con, rota: str, ttl_s: float | None = None, forcar: bool = False, **params) -> dict:
+    """GET /tracker/api/<rota>, com cache no banco. Se o site falhar e houver uma cópia velha, usa a velha.
+    Com `forcar`, o cache só vale por `TTL_FORCADO_S`. A resposta traz `_ms`: quando foi lida do site."""
     preparar(con)
     params = {k: v for k, v in params.items() if v not in (None, "")}
     chave = rota + "?" + urllib.parse.urlencode(sorted(params.items()))
     ttl = TTL_S.get(rota, 3600) if ttl_s is None else ttl_s
+    if forcar:
+        ttl = min(ttl, TTL_FORCADO_S)
     agora = time.time()
     r = con.execute("SELECT ms, json FROM pvp_cache WHERE chave = ?", (chave,)).fetchone()
     if r and agora - r[0] / 1000 < ttl:
-        return json.loads(r[1])
+        return json.loads(r[1]) | {"_ms": r[0]}
     global _ultimo_pedido
     with _trava:
         espera = _ultimo_pedido + PAUSA_S - time.time()
@@ -143,18 +147,18 @@ def tracker(con, rota: str, ttl_s: float | None = None, **params) -> dict:
             except Exception:
                 erro = ""
             if r and e.code >= 429:
-                return json.loads(r[1]) | {"_velho": True}
+                return json.loads(r[1]) | {"_velho": True, "_ms": r[0]}
             raise ErroPvP(MENSAGENS.get(erro, f"o Tracker respondeu {e.code} {erro}".strip())) from None
         except (urllib.error.URLError, TimeoutError, OSError):
             if r:
-                return json.loads(r[1]) | {"_velho": True}
+                return json.loads(r[1]) | {"_velho": True, "_ms": r[0]}
             raise ErroPvP("o Tracker do jogo não respondeu") from None
         finally:
             _ultimo_pedido = time.time()
     con.execute("INSERT OR REPLACE INTO pvp_cache (chave, ms, json) VALUES (?,?,?)",
                 (chave, int(agora * 1000), json.dumps(dados, ensure_ascii=False)))
     con.commit()
-    return dados
+    return dados | {"_ms": int(agora * 1000)}
 
 
 def atualizar_meta(con) -> None:
@@ -237,16 +241,17 @@ def _buracos(time_tipos: list[list[str]]) -> list[dict]:
 
 
 def analisar(con, nick: str, faixa: str = "", orcamento: float | None = None, moeda: str = "gems",
-             limite: int = 30) -> dict:
+             limite: int = 30, forcar: bool = False) -> dict:
+    """Com `forcar` ("Atualizar agora"), o seu perfil e o meta do rank são lidos de novo do Tracker."""
     nick = nick.strip()
     if not nick:
         raise ErroPvP("falta o nick")
-    perfil = tracker(con, "jogador", nick=nick)
+    perfil = tracker(con, "jogador", forcar=forcar, nick=nick)
     partidas = perfil.get("partidas") or []
     rank = perfil.get("rank") or {}
     if faixa not in FAIXAS:  # sem escolha: o rank do próprio jogador
         faixa = TIER_PARA_FAIXA.get(rank.get("tierId") or "", "todas")
-    meta = tracker(con, "meta", ordem="uso", limite=200, faixa="" if faixa == "todas" else faixa)
+    meta = tracker(con, "meta", forcar=forcar, ordem="uso", limite=200, faixa="" if faixa == "todas" else faixa)
     meta_por_id = {int(x["id"]): x for x in meta.get("linhas") or []}
 
     time_ = _time_atual(partidas)
@@ -337,7 +342,8 @@ def analisar(con, nick: str, faixa: str = "", orcamento: float | None = None, mo
             "partidas_recentes": len(partidas),
             "vitorias_recentes": sum(1 for p in partidas if p.get("venci")),
             "temporada": perfil.get("partidasTemporada"), "orcamento": orcamento, "moeda": moeda,
-            "velho": bool(perfil.get("_velho") or meta.get("_velho")), "nomes_tipo": NOMES_TIPO}
+            "velho": bool(perfil.get("_velho") or meta.get("_velho")), "nomes_tipo": NOMES_TIPO,
+            "lido_em": perfil.get("_ms"), "meta_lido_em": meta.get("_ms")}
 
 
 def _anuncios(con, sugestoes: list[dict], orcamento: float, moeda: str) -> None:

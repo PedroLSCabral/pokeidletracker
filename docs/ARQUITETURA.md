@@ -286,7 +286,7 @@ Todas as rotas GET aceitam `moeda=gems|coins` (o padrão é gems).
 | `GET /api/pokemon?busca=&shiny=&limite=` | `api_pokemon` | Vendas recentes de Pokémon |
 | `GET /api/pk/buscar?orcamento=&objetivo=&especie=&tipo=&pmin=&nivel=&nota=&shiny=&treinador=&pvp_nick=&pvp_faixa=&transferir=` | `pokemon.buscar` (+ `pvp.pesos_especies` se `objetivo` é `pvp` ou `ponte`; + `venda.cambio` se `ponte`) | Anúncios da loja ordenados pelo objetivo, com o XP/h de cada um (`xp_h`, `xp_hunt`) para o nível de treinador `treinador`. Com `objetivo=ponte`, traz `ponte` (piso, teto e, com `transferir` em gemas, a comissão, quanto recebe e o custo total) e `aviso_pvp` se o Tracker falhou |
 | `GET /api/pk/padroes?dias=` | `pokemon.padroes` | Padrões do mercado de Pokémon |
-| `GET /api/pvp?nick=&faixa=&orcamento=&moeda=` | `pvp.analisar` | Aba PvP inteira |
+| `GET /api/pvp?nick=&faixa=&orcamento=&moeda=&forcar=` | `pvp.analisar` | Aba PvP inteira. `forcar=1` relê o seu perfil e o meta sem esperar o cache |
 | `GET /api/status` | `api_status` → `coletor.status` | Estado da coleta e as últimas linhas do log |
 | `POST /api/regras` | `post_regra` | Cria uma regra {tipo, item, moeda, valor} |
 | `POST /api/regras/apagar`, `/api/regras/alternar` | `post_regra_acao` | {id} |
@@ -409,9 +409,9 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
 
 ### `analise/pvp.py` (aba PvP)
 - **Tipos:** `TABELA` é a tabela de tipos da série, a mesma de `shared/tipo-efetividade.mjs` do jogo. `mult(atq, defesa)` dá o multiplicador e `melhor_ataque(atacante, defensor)` o melhor golpe de mesmo tipo.
-- **`tracker(con, rota, ttl_s, **params)`:** GET com cache, 1,5 s entre pedidos e a cópia velha guardada se o site falhar. Os erros viram `ErroPvP` com mensagem em português.
+- **`tracker(con, rota, ttl_s, forcar, **params)`:** GET com cache, 1,5 s entre pedidos e a cópia velha guardada se o site falhar. Os erros viram `ErroPvP` com mensagem em português. Com `forcar`, o cache só vale por `TTL_FORCADO_S` (1 min), para cliques seguidos não martelarem o site. A resposta traz `_ms` (quando foi lida do Tracker).
 - **`atualizar_meta(con)`:** a pré-carga do robô (meta das faixas todas, alto e mestre, mais o ladder e os 10 primeiros perfis).
-- **`analisar(con, nick, faixa, orcamento, moeda)`:**
+- **`analisar(con, nick, faixa, orcamento, moeda, forcar)`:** com `forcar` (botão "Atualizar agora"), o perfil e o meta do rank são lidos de novo; devolve `lido_em` e `meta_lido_em`.
   - `_time_atual`: as espécies das últimas 5 partidas;
   - `_ameacas`: os counters da temporada mais os pokémons nos times das derrotas recentes, com peso nas recentes e no dano;
   - `_buracos` e os tipos que castigam;
@@ -448,7 +448,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   - **vender:** `abrirVenda`, `desenharVenda`, `ligarVenda` e o estado em `venda`;
   - **sinais:** `carregarSinais`, `desenharSinais`, `ligarSinais`; `postar()` para os POST;
   - **aviso sonoro:** `checarAlertasNovos` (polling), `tocar` (WebAudio), `mostrarAviso`;
-  - **PvP:** `analisarPvp`, `desenharPvp`, `ligarPvp`. O nick fica no `localStorage` (`pvp_nick`);
+  - **PvP:** `analisarPvp(e, forcar)` (o botão `#pvp-forcar` manda `forcar=1`), `desenharPvp`, `ligarPvp`, `haQuanto`. O nick fica no `localStorage` (`pvp_nick`);
   - **pokémon:** `mostrarSubPk`, `buscarPk`, `carregarPadroesPk`, `carregarPokemon`, `ligarPokemon`;
   - **status e navegação:** `carregarStatus`, `mostrarAba`, `ligar()` (liga todos os eventos) e `iniciar()` (carga inicial e os timers de 1 e 5 min).
 - **Regras da página:**
