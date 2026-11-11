@@ -39,6 +39,14 @@ MIN_LOCAIS_ALTA = 8       # ...e para chamar isso de confiança alta
 MIN_GRUPO = 3             # vendas da espécie (mesmo shiny e moeda) para ter um preço base
 DIARIA_ANUNCIO_COINS = 100_000
 FUNIL_XP = 200            # objetivo "xp": só os N melhores pelo índice de caça passam pela conta de XP/h
+# Objetivo "ponte" (levar gemas de uma conta para a outra comprando e revendendo um Pokémon de piso).
+# Candidatos: até FOLGA_PONTE acima do menor anúncio ativo (com os filtros). No piso em coins há centenas
+# de anúncios entre ~45 e ~50 mi, então 15% pega o piso inteiro sem chegar nos Pokémon "de verdade". Se o
+# piso tiver poucos anúncios (uma espécie filtrada, shiny), o teto sobe até o MIN_PONTE-ésimo mais barato,
+# mas nunca passa de TETO_PONTE × o piso: um piso isolado não pode virar "qualquer preço".
+FOLGA_PONTE = 0.15
+MIN_PONTE = 30
+TETO_PONTE = 1.5
 
 OBJETIVOS = {
     "equilibrado": "bom de caça e com preço justo (60% dano de caça, 40% desconto)",
@@ -49,6 +57,7 @@ OBJETIVOS = {
     "custo": "mais dano de caça por cada gema/coin gasta",
     "nota": "a maior nota",
     "pvp": "melhor para PvP: espécie forte no meta do rank (e contra quem você perde, com nick) + poder",
+    "ponte": "transferir gemas entre contas: o melhor Pokémon (para PvP) no piso de preço",
 }
 
 # Faixas usadas pelo modelo (as mesmas da aba Padrões).
@@ -209,7 +218,8 @@ def comparaveis(con) -> Comparaveis:
 
 def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibrado", especie: str = "",
            tipo: str = "", shiny: bool = False, potencia_min: int = 0, nivel_min: int = 0, nota_min: float = 0,
-           limite: int = 60, pesos_pvp: dict[int, float] | None = None, nivel_treinador: int | None = None) -> dict:
+           limite: int = 60, pesos_pvp: dict[int, float] | None = None, nivel_treinador: int | None = None,
+           transferir: float = 0, coins_por_gema: float | None = None) -> dict:
     lojapk.preparar(con)
     filtro = ["ativo = 1", "moeda = ?", "preco <= ?"]
     args: list = [moeda, orcamento]
@@ -230,6 +240,17 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
     if nota_min:
         filtro.append("nota >= ?")
         args.append(nota_min)
+    ponte = None
+    if objetivo == "ponte":
+        # O piso vem dos anúncios com os mesmos filtros, sem o orçamento (que continua valendo como teto).
+        onde = " AND ".join(f for f in filtro if f != "preco <= ?")
+        sem_orc = [a for i, a in enumerate(args) if i != 1]
+        precos = [r[0] for r in con.execute(f"SELECT preco FROM pk_anuncios WHERE {onde} AND preco > 0 ORDER BY preco", sem_orc)]
+        if precos:
+            piso = precos[0]
+            teto = max(piso * (1 + FOLGA_PONTE), min(precos[min(MIN_PONTE, len(precos)) - 1], piso * TETO_PONTE))
+            args[1] = min(orcamento, teto)
+            ponte = {"piso": piso, "teto": args[1], "folga_pct": round(FOLGA_PONTE * 100)}
     linhas = con.execute(f"SELECT * FROM pk_anuncios WHERE {' AND '.join(filtro)}", args).fetchall()
     comps = comparaveis(con)
     res = []
@@ -301,6 +322,14 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
             x["nota_pvp"] = round((pesos_pvp or {}).get(x["species_id"], 0.0), 3)
             x["pontos"] = round(0.6 * x["nota_pvp"] + 0.4 * p_poder(x["poder"]), 3)
         res.sort(key=lambda x: -x["pontos"])
+    elif objetivo == "ponte":
+        # O Pokémon fica na conta que mandou as gemas e vai para o PvP dela (revender um de piso não sai): entre os
+        # baratos, o mais decente. Mesma conta do "pvp"; o índice de caça desempata e, depois, o preço.
+        p_poder = pct("poder")
+        for x in res:
+            x["nota_pvp"] = round((pesos_pvp or {}).get(x["species_id"], 0.0), 3)
+            x["pontos"] = round(0.6 * x["nota_pvp"] + 0.4 * p_poder(x["poder"]), 3)
+        res.sort(key=lambda x: (-x["pontos"], -(x["caca"] or 0), x["preco"]))
     else:  # equilibrado
         p_caca, p_desc = pct("caca"), pct("desconto")
         for x in res:
@@ -314,10 +343,38 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
         com_xp(res)
     for x in res:
         x.pop("_ficha", None)
+    if ponte is not None:
+        ponte.update(_conta_ponte(transferir, res[0] if res else None, moeda, coins_por_gema))
     snap = con.execute("SELECT MAX(snap_ms) FROM pk_varreduras").fetchone()[0]
-    return {"total": total, "itens": res, "objetivo": objetivo, "orcamento": orcamento, "moeda": moeda,
+    return {"ponte": ponte, "total": total, "itens": res, "objetivo": objetivo, "orcamento": orcamento, "moeda": moeda,
             "nivel_treinador": nivel_treinador, "aviso_xp": aviso_xp, "funil_xp": FUNIL_XP if objetivo == "xp" else None,
             "varredura_ms": snap, "anuncios_na_loja": con.execute("SELECT COUNT(*) FROM pk_anuncios WHERE ativo=1").fetchone()[0]}
+
+
+def _conta_ponte(transferir: float, primeiro: dict | None, moeda: str, coins_por_gema: float | None) -> dict:
+    """A conta da transferência: a conta que recebe anuncia o Pokémon em gemas por `transferir` e a outra
+    compra. Recebe o preço menos a comissão progressiva; o custo é a comissão + o Pokémon (o 1º da lista,
+    convertido pelo câmbio se em coins) + a diária de anúncio. Em gemas; sem câmbio, a parte em coins
+    fica de fora do total e vai à parte."""
+    if not transferir or transferir <= 0:
+        return {"transferir": None}
+    comissao = taxa_venda(transferir, "gems")
+    out = {"transferir": transferir, "comissao": comissao, "recebe": transferir - comissao,
+           "coins_por_gema": coins_por_gema, "diaria_coins": DIARIA_ANUNCIO_COINS}
+    if not primeiro:
+        return out
+    preco = primeiro["preco"]
+    em_coins = DIARIA_ANUNCIO_COINS + (preco if moeda == "coins" else 0)
+    em_gemas = comissao + (preco if moeda == "gems" else 0)
+    if coins_por_gema:
+        out.update(pokemon_gemas=round(preco / coins_por_gema if moeda == "coins" else preco, 1),
+                   diaria_gemas=round(DIARIA_ANUNCIO_COINS / coins_por_gema, 1),
+                   custo_total_gemas=round(em_gemas + em_coins / coins_por_gema, 1), custo_coins_sem_cambio=None)
+    else:
+        out.update(pokemon_gemas=preco if moeda == "gems" else None, diaria_gemas=None,
+                   custo_total_gemas=em_gemas, custo_coins_sem_cambio=em_coins)
+    out["custo_pct"] = round(out["custo_total_gemas"] / transferir * 100, 1)
+    return out
 
 
 # ---------------------------------------------------------------- padrões

@@ -463,14 +463,24 @@ class Handler(BaseHTTPRequestHandler):
                 if url.path == "/api/pk/buscar":
                     num = lambda k, d=0: float(q[k]) if q.get(k, "").strip() else d  # noqa: E731
                     objetivo = q.get("objetivo", "equilibrado")
-                    pesos = None
+                    pesos, extra = None, {}
                     if objetivo == "pvp":
                         pesos = pvp.pesos_especies(con, q.get("pvp_faixa", "alto")[:12], q.get("pvp_nick", "").strip()[:20])
+                    elif objetivo == "ponte":
+                        # Sem o Tracker a ponte ainda serve (ordena pelo ⚔); só avisa.
+                        try:
+                            pesos = pvp.pesos_especies(con, q.get("pvp_faixa", "alto")[:12], q.get("pvp_nick", "").strip()[:20])
+                        except pvp.ErroPvP as e:
+                            extra["aviso_pvp"] = str(e)
+                        extra["transferir"] = num("transferir")
+                        extra["coins_por_gema"] = venda.cambio(con)["coins_por_gema"]
                     return self._json(analise_pokemon.buscar(
                         con, num("orcamento", 1e18), moeda, objetivo,
                         q.get("especie", "").strip()[:40], q.get("tipo", "")[:12], q.get("shiny") == "1",
                         int(num("pmin")), int(num("nivel")), num("nota"), pesos_pvp=pesos,
-                        nivel_treinador=int(num("treinador")) or None) | {"objetivos": analise_pokemon.OBJETIVOS})
+                        nivel_treinador=int(num("treinador")) or None, transferir=extra.get("transferir", 0),
+                        coins_por_gema=extra.get("coins_por_gema"))
+                        | {"objetivos": analise_pokemon.OBJETIVOS, "aviso_pvp": extra.get("aviso_pvp")})
                 if url.path == "/api/pvp":
                     orc = float(q["orcamento"]) if q.get("orcamento", "").strip() else None
                     return self._json(pvp.analisar(con, q.get("nick", "")[:20], q.get("faixa", "")[:12], orc,

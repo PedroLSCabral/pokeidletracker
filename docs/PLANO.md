@@ -410,5 +410,11 @@ O que a validação ensinou:
 - **Resultado:** contra a calculadora, a mesma hunt em 6 de 6 casos, com o XP/h entre −15% e +17%. O ponto fixo do tempo morto melhorava pouco e custava 1,7×, então ficou de fora.
 - **Outra lentidão achada no caminho:** a busca de Pokémon refazia o modelo de preço justo (~3 s) em toda chamada. Agora ele fica em memória até entrar venda nova.
 
+## Pokémon ponte para levar gemas entre contas (11/11)
+O jogo não tem troca entre jogadores. O caminho permitido: a conta que vai receber compra um Pokémon no piso do mercado em coins, anuncia em gemas pelo valor a transferir (um preço que ninguém mais paga num Pokémon de piso) e a outra conta compra logo em seguida. A busca ganhou o objetivo "ponte".
+- **Candidatos:** até 15% acima do menor anúncio ativo. No piso em coins há centenas de anúncios entre ~45 e ~50 mi; 15% pega esse bloco sem chegar nos Pokémon caros. Um percentil foi descartado porque depende do tamanho da loja inteira (o p5 de 5 mil anúncios já sai do piso). Se um filtro deixar o piso com poucos anúncios, o teto sobe até o 30º mais barato, sem passar de 1,5× o piso.
+- **Ordem:** revender um Pokémon de piso não sai (há centenas iguais), então ele fica na conta que mandou as gemas e vai para o PvP dela. Por isso o mais decente para PvP primeiro, com a mesma conta do objetivo `pvp` (nota da espécie 60%, ⚔ 40%) e o índice de caça e o preço como desempate. Se o Tracker cair, a ponte ainda funciona pelo ⚔.
+- **Custo:** comissão progressiva de Pokémon em gemas + o Pokémon pelo câmbio do mercado + a diária de 100 mil coins do anúncio. O Pokémon e a diária são fixos, então, em proporção, a ponte sai mais barata em valores grandes.
+
 ## Perguntas em aberto
 - Os nomes no export para as outras raridades devem ser `Uncommon`, `Mythic` e `Legendary` (só vimos `Common` e `Rare`). Isso se confirma quando aparecerem vendas.

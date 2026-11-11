@@ -969,7 +969,42 @@ const OBJETIVOS_PK = {
   custo: 'mais dano de caça por gema/coin',
   nota: 'a maior nota',
   pvp: 'melhor para PvP (meta do rank + contra quem você perde)',
+  ponte: 'transferir gemas entre contas: o melhor Pokémon no piso de preço',
 };
+// O texto de baixo do formulário muda com o objetivo: a ponte pede o passo a passo.
+const EXPLICA_PK = {
+  ponte: '<b>Ponte de gemas:</b> 1) a conta que vai receber compra aqui um Pokémon de piso (em coins, o padrão); '
+    + '2) anuncia esse Pokémon em gemas pelo valor a transferir (ex.: 310); 3) a outra conta compra logo em seguida (ninguém mais paga isso num Pokémon de piso); '
+    + '4) a que anunciou recebe o valor menos a comissão. O Pokémon fica na conta que mandou as gemas e vai para o PvP dela, '
+    + 'por isso a lista vem do mais decente para PvP (meta do rank, + ⚔; com o nick da aba PvP, também contra quem você perde).',
+};
+let explicaPadraoPk = '';
+
+function trocarObjetivoPk() {
+  const ponte = $('#pkb-obj').value === 'ponte';
+  $('#pkb-transf-rot').classList.toggle('hidden', !ponte);
+  // Na ponte o teto é o piso do mercado; o orçamento vira opcional.
+  $('#pkb-orc').required = !ponte;
+  $('#pkb-orc').placeholder = ponte ? 'opcional' : 'ex.: 300';
+  if (ponte) $('#pkb-moeda').value = 'coins';
+  $('#pkb-explica').innerHTML = EXPLICA_PK[$('#pkb-obj').value] || explicaPadraoPk;
+  if (!ponte) $('#pkb-ponte').classList.add('hidden');
+}
+
+function resumoPonte(p, m) {
+  if (!p) return 'Nenhum anúncio nessa moeda com esses filtros: sem piso para calcular.';
+  let t = `Piso agora: <b>${fmtNum(p.piso, m)}</b>. Entram os anúncios até ${fmtNum(p.teto, m)} (até ${p.folga_pct}% acima do piso, ou o orçamento se for menor).`;
+  if (!p.transferir) return t + ' Preencha "quanto vou transferir" para ver a conta.';
+  t += `<br>Transferindo <b>${fmtNum(p.transferir, 'gems')} gemas</b>: comissão de ${fmtNum(p.comissao, 'gems')} (${nf(1).format(p.comissao / p.transferir * 100)}%), a conta que anunciou recebe <b>${fmtNum(p.recebe, 'gems')} gemas</b>.`;
+  if (p.custo_total_gemas == null) return t;
+  t += ` Custo total com o 1º da lista: <b>${nf(1).format(p.custo_total_gemas)} gemas</b> (${nf(1).format(p.custo_pct)}% do valor) = comissão`
+    + (p.pokemon_gemas != null ? ` + Pokémon ${nf(1).format(p.pokemon_gemas)}` : '')
+    + (p.diaria_gemas != null ? ` + diária de anúncio ${nf(1).format(p.diaria_gemas)}` : '');
+  t += p.coins_por_gema
+    ? ` (câmbio de ${fmtNum(p.coins_por_gema, 'coins')} coins por gema).`
+    : `, mais ${fmtNum(p.custo_coins_sem_cambio, 'coins')} coins (sem câmbio do mercado ainda para converter).`;
+  return t;
+}
 estado.pksub = 'buscar';
 estado.pkdias = 7;
 
@@ -993,15 +1028,20 @@ async function buscarPk(e) {
     tipo: $('#pkb-tipo').value, pmin: $('#pkb-pmin').value, nivel: $('#pkb-nivel').value, nota: $('#pkb-nota').value,
     shiny: $('#pkb-shiny').checked ? 1 : '', treinador: $('#pkb-treinador').value,
     // Objetivo PvP: o meta do high elo e, se o nick já foi preenchido na aba PvP, as suas ameaças.
-    pvp_nick: $('#pkb-obj').value === 'pvp' ? lerLocal('pvp_nick') : '', pvp_faixa: 'alto',
+    pvp_nick: ['pvp', 'ponte'].includes($('#pkb-obj').value) ? lerLocal('pvp_nick') : '', pvp_faixa: 'alto',
+    transferir: $('#pkb-obj').value === 'ponte' ? $('#pkb-transf').value : '',
   });
+  if ($('#pkb-obj').value === 'ponte') gravarLocal('pk_transferir', $('#pkb-transf').value);
   gravarLocal('pk_treinador', $('#pkb-treinador').value);
   $('#pkb-sub').textContent = d.varredura_ms
     ? `loja lida às ${fDiaHora.format(d.varredura_ms)} · ${nf(0).format(d.anuncios_na_loja)} anúncios · ${nf(0).format(d.total)} cabem no orçamento`
       + (d.funil_xp ? ` · XP/h calculado nos ${d.funil_xp} que mais batem` : '')
     : 'a loja ainda não foi lida pelo robô';
   if (d.aviso_xp) $('#pkb-sub').textContent += ` · XP/h: ${d.aviso_xp}`;
+  if (d.aviso_pvp) $('#pkb-sub').textContent += ` · PvP: ${d.aviso_pvp} (ordenado só pelo ⚔)`;
   const m = d.moeda;
+  $('#pkb-ponte').classList.toggle('hidden', d.objetivo !== 'ponte');
+  if (d.objetivo === 'ponte') $('#pkb-ponte').innerHTML = resumoPonte(d.ponte, m);
   $('#pkb-tabela').innerHTML = `
     <tr><th>#</th><th>Pokémon</th><th class="num">Nv</th><th class="num">P</th><th class="num">IV</th><th class="num">Qual.</th><th class="num">Nota</th>
       <th class="num" title="⚔ do jogo: a soma dos 6 atributos em escala de log (a régua do ranking)">Poder</th>
@@ -1080,6 +1120,9 @@ async function carregarPadroesPk() {
 function ligarPokemon() {
   $('#pkb-obj').innerHTML = Object.entries(OBJETIVOS_PK).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
   $('#pkb-treinador').value = lerLocal('pk_treinador');
+  $('#pkb-transf').value = lerLocal('pk_transferir');
+  explicaPadraoPk = $('#pkb-explica').innerHTML;
+  $('#pkb-obj').addEventListener('change', trocarObjetivoPk);
   $('#pkb-tipo').innerHTML = '<option value="">qualquer</option>' + Object.entries(TIPOS_PK).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
   $('#pkb-form').addEventListener('submit', buscarPk);
   ligarPvp();

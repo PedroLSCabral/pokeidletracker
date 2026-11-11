@@ -158,9 +158,11 @@
           <label>Nota mín. <input id="pkb-nota" class="campo" type="number" min="3" max="5" step="0.01" placeholder="qualquer"></label>
           <label title="Só entram as hunts que o seu treinador já libera (para o XP/h)">Seu nível de treinador <input id="pkb-treinador" class="campo" type="number" min="1" placeholder="sem limite"></label>
           <label class="check"><input type="checkbox" id="pkb-shiny"> só shiny</label>
+          <label class="hidden" id="pkb-transf-rot" title="O preço absurdo em gemas do anúncio: o saldo que a outra conta vai mandar">Quanto vou transferir (gemas) <input id="pkb-transf" class="campo" type="number" min="1" step="1" placeholder="ex.: 310"></label>
           <button class="btn-primario" type="submit">Procurar</button>
         </form>
         <p class="explica" id="pkb-explica">O <b>preço justo</b> de cada anúncio vem das vendas parecidas dos últimos 14 dias (mesma espécie, mesmo shiny, potência/nota/IV/qualidade/nível mais próximos). <b>Desconto</b> = quanto o anúncio está abaixo disso.</p>
+        <p class="explica hidden" id="pkb-ponte"></p>
         <div class="tabela-wrap" style="max-height:640px"><table class="tabela" id="pkb-tabela"></table></div>
         <p class="aviso">A loja é lida a cada 3 h: um anúncio da lista pode já ter sido vendido. Para comprar, procure a espécie no Mercado do jogo e confira o vendedor e o preço. Revenda líquida = preço justo − taxa progressiva do jogo (− diária de 100 mil coins, se em coins).</p>
       </div>

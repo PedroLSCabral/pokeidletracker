@@ -283,7 +283,7 @@ Todas as rotas GET aceitam `moeda=gems|coins` (o padrão é gems).
 | `GET /api/sinais` | `api_sinais` → `sinais.calcular` | Revenda, barato/caro, regras, log de alertas e canais |
 | `GET /api/alertas/novos?desde=ms` | `api_alertas_novos` | Alertas gravados depois de `desde` (para o som) |
 | `GET /api/pokemon?busca=&shiny=&limite=` | `api_pokemon` | Vendas recentes de Pokémon |
-| `GET /api/pk/buscar?orcamento=&objetivo=&especie=&tipo=&pmin=&nivel=&nota=&shiny=&treinador=&pvp_nick=&pvp_faixa=` | `pokemon.buscar` (+ `pvp.pesos_especies` se `objetivo=pvp`) | Anúncios da loja ordenados pelo objetivo, com o XP/h de cada um (`xp_h`, `xp_hunt`) para o nível de treinador `treinador` |
+| `GET /api/pk/buscar?orcamento=&objetivo=&especie=&tipo=&pmin=&nivel=&nota=&shiny=&treinador=&pvp_nick=&pvp_faixa=&transferir=` | `pokemon.buscar` (+ `pvp.pesos_especies` se `objetivo` é `pvp` ou `ponte`; + `venda.cambio` se `ponte`) | Anúncios da loja ordenados pelo objetivo, com o XP/h de cada um (`xp_h`, `xp_hunt`) para o nível de treinador `treinador`. Com `objetivo=ponte`, traz `ponte` (piso, teto e, com `transferir` em gemas, a comissão, quanto recebe e o custo total) e `aviso_pvp` se o Tracker falhou |
 | `GET /api/pk/padroes?dias=` | `pokemon.padroes` | Padrões do mercado de Pokémon |
 | `GET /api/pvp?nick=&faixa=&orcamento=&moeda=` | `pvp.analisar` | Aba PvP inteira |
 | `GET /api/status` | `api_status` → `coletor.status` | Estado da coleta e as últimas linhas do log |
@@ -387,6 +387,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   - `equilibrado` pesa 60% o percentil do índice de caça e 40% o do desconto (só com confiança alta ou média);
   - `forte` ordena pelo ⚔ (`poder`) do jogo; `barganha`, pelo desconto; `nota`, pela nota;
   - `pvp` usa `pesos_pvp` por `species_id` (60%) e o percentil do ⚔ (40%).
+  - `ponte` (levar gemas de uma conta para a outra): só entram os anúncios até `FOLGA_PONTE` (15%) acima do menor anúncio ativo com os mesmos filtros; se houver poucos, o teto sobe até o `MIN_PONTE`-ésimo (30) mais barato, sem passar de `TETO_PONTE` (1,5) × o piso. O orçamento, se vier, é teto. Ordena como o `pvp`, com o índice de caça e o preço de desempate. `_conta_ponte` faz a conta da transferência: comissão (`taxa_venda` em gemas), quanto a conta que anunciou recebe e o custo total em gemas com o 1º da lista (comissão + Pokémon pelo câmbio + `DIARIA_ANUNCIO_COINS`). No painel, se o Tracker falhar, a ponte segue só pelo ⚔ e devolve `aviso_pvp`.
 - **Por que não o ⚔ para caçar:** no jogo (`shared/nota-pokemon.mjs`), `poder = nível × 10 × score`, e o score é a soma dos seis stats de nascimento numa escala de log entre o pior e o melhor nascimento possíveis. HP, DEF e SP.DEF pesam tanto quanto o ataque, e o log achata as diferenças: o dobro de ATK dá ~30% a mais de ⚔. Dividir o ⚔ pelo preço favorecia os baratos fracos.
 - **`padroes(...)`** mostra volume, prêmios por atributo, espécies, horários e compradores.
 
