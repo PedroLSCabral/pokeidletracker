@@ -378,7 +378,9 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   - Senão, usa o modelo de multiplicadores em log: base da espécie × nível × nota × potência, ajustado por backfitting.
   - Uma espécie cujas vendas saem todas como fora da curva no 2º ajuste fica sem preço base: `preco_justo` confere `(especie, shiny) in base` antes de usar o modelo.
 - **`taxa_venda`** calcula a comissão progressiva do jogo para Pokémon.
-- **`indice_caca(nivel, stats)`** é o dano de um golpe na caça, pela fórmula de dano do jogo: `(2·nível/5 + 2) × máx(ATK, SP.ATK) / 100`. Ficam de fora o poder do golpe, a DEF do alvo e o STAB, que valem igual para todos. Os stats do anúncio já vêm no nível dele.
+- **`lado_fisico(species_id, nivel, stats)`** diz quanto da força da espécie é física (0 a 1): os golpes do catálogo liberados no nível, cada um pesando poder ÷ recarga. Sem catálogo, o maior entre ATK e SP.ATK do Pokémon. Guarda em cache por (motor, espécie, nível).
+- **`indice_caca(nivel, stats, ivs, fisico)`** é o dano na caça, pela fórmula de dano do jogo: `(2·nível/5 + 2) × (ATK·fisico + SP.ATK·(1−fisico)) × cadência / 100`. A cadência vem do IV de SPD (1 no IV 16, ~0,9 no 1, ~1,14 no 32). Ficam de fora o poder do golpe, a DEF do alvo e o STAB, que valem igual para todos. Os stats do anúncio já vêm no nível dele.
+- **`nota_ivs(ivs, fisico)`** é a nota de 0 a 10 dos IVs individuais (`PESO_IV`): 40% o IV do ataque da espécie, 30% o de SPD, 10% cada HP, DEF e SP.DEF. Um IV de ataque ou SPD abaixo de `IV_RUIM` (11) tira até `CASTIGO_IV` (40%). Devolve nota, lado, os dois IVs-chave e os horríveis (`ruins`); a busca manda isso em `ivs_nota`.
 - **`comparaveis(con)`** guarda o modelo de preço justo em memória e só o refaz quando entra venda nova (`MAX(rowid)` de `trades`) ou a hora vira. Ajustar do zero leva ~3 s; o painel o prepara ao ligar (`painel.aquecer`).
 - **`buscar(...)`** procura na loja (`pk_anuncios`) os anúncios ativos dentro do orçamento e ordena pelo objetivo (`OBJETIVOS`):
   - `xp` ordena pelo XP/h (`caca.xp_do_anuncio`) na melhor hunt liberada para `nivel_treinador`. Funil: só os `FUNIL_XP` (200) melhores pelo índice de caça passam pela conta. Medido na loja inteira, o top 20 em XP/h sempre esteve entre os 100 que mais batem;
@@ -386,7 +388,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   - `caca` ordena pelo índice de caça; `custo`, pelo índice de caça por gema ou coin;
   - `equilibrado` pesa 60% o percentil do índice de caça e 40% o do desconto (só com confiança alta ou média);
   - `forte` ordena pelo ⚔ (`poder`) do jogo; `barganha`, pelo desconto; `nota`, pela nota;
-  - `pvp` usa `pesos_pvp` por `species_id` (60%) e o percentil do ⚔ (40%).
+  - `pvp` usa `pesos_pvp` por `species_id` (`PESO_PVP_ESPECIE`, 60%), o percentil do ⚔ (`PESO_PVP_PODER`, 15%) e o da nota dos IVs (`PESO_PVP_IVS`, 25%).
   - `ponte` (levar gemas de uma conta para a outra): só entram os anúncios até `FOLGA_PONTE` (15%) acima do piso, que é a mediana dos `PISO_K` (10) anúncios ativos mais baratos com os mesmos filtros (um anúncio isolado muito barato não vira o piso; os abaixo do piso também entram); se houver poucos, o teto sobe até o `MIN_PONTE`-ésimo (30) mais barato, sem passar de `TETO_PONTE` (1,5) × o piso. O orçamento, se vier, é teto. Ordena como o `pvp`, com o índice de caça e o preço de desempate. `_conta_ponte` faz a conta da transferência: comissão (`taxa_venda` em gemas), quanto a conta que anunciou recebe e o custo total em gemas com o 1º da lista (comissão + Pokémon pelo câmbio + `DIARIA_ANUNCIO_COINS`). No painel, se o Tracker falhar, a ponte segue só pelo ⚔ e devolve `aviso_pvp`.
 - **Por que não o ⚔ para caçar:** no jogo (`shared/nota-pokemon.mjs`), `poder = nível × 10 × score`, e o score é a soma dos seis stats de nascimento numa escala de log entre o pior e o melhor nascimento possíveis. HP, DEF e SP.DEF pesam tanto quanto o ataque, e o log achata as diferenças: o dobro de ATK dá ~30% a mais de ⚔. Dividir o ⚔ pelo preço favorecia os baratos fracos.
 - **`padroes(...)`** mostra volume, prêmios por atributo, espécies, horários e compradores.
@@ -416,7 +418,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
     - 45%: quem ganha das ameaças, pelas páginas `pokemon` delas, com pelo menos `MIN_CONFRONTOS` (20) e confiança n/(n+60);
     - 35%: a taxa no meta do rank, encolhida para 50% (`_nota_meta`);
     - 20%: o encaixe de tipos.
-  - com orçamento, `_anuncios` acha na loja o mais forte e o mais barato de cada sugestão;
+  - com orçamento, `_anuncios` acha na loja o melhor (40% percentil do ⚔ e 60% o da `pokemon.nota_ivs`, dentro da espécie) e o mais barato de cada sugestão;
   - `_resumo_meta` traz os mais usados, a melhor taxa e os times do topo.
 - **`pesos_especies(con, faixa, nick)`:** uma nota de 0 a 1 por espécie, para o objetivo `pvp` da busca.
 

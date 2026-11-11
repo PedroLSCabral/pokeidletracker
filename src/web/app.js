@@ -905,12 +905,12 @@ function desenharPvp() {
 
   const soLoja = $('#pvp-soloja')?.checked ?? !!d.orcamento;
   const sugs = d.sugestoes.filter((s) => !soLoja || !d.orcamento || s.mais_forte);
-  const anuncio = (a) => (a ? `${htmlPreco(a.preco, m)} <span class="aviso">Nv ${nf(0).format(a.nivel)} · P${a.potencia ?? '?'} · ${nf(0).format(a.poder || 0)} de poder${a.shiny ? ' · shiny' : ''}</span>` : '');
+  const anuncio = (a) => (a ? `${htmlPreco(a.preco, m)} <span class="aviso">Nv ${nf(0).format(a.nivel)} · P${a.potencia ?? '?'} · ${nf(0).format(a.poder || 0)} de poder${a.ivs_nota ? ' · ' + htmlIvsChave(a.ivs_nota) : ''}${a.shiny ? ' · shiny' : ''}</span>` : '');
   const sugestoes = `
     <div class="caixa"><h3>Quem comprar para o seu time</h3>
       ${d.orcamento ? `<label class="check"><input type="checkbox" id="pvp-soloja" ${soLoja ? 'checked' : ''}> só o que tem anúncio até ${fmtNum(d.orcamento, m)} ${m === 'gems' ? 'gemas' : 'coins'}</label>` : '<p class="aviso">Ponha um orçamento para ver os anúncios da loja de cada sugestão.</p>'}
       <div class="tabela-wrap" style="max-height:none"><table class="tabela">
-        <tr><th>#</th><th>Pokémon</th><th>Por quê</th><th class="num">Meta</th>${d.orcamento ? '<th>Na loja: o mais forte</th><th>O mais barato</th>' : ''}</tr>
+        <tr><th>#</th><th>Pokémon</th><th>Por quê</th><th class="num">Meta</th>${d.orcamento ? '<th title="Pelo ⚔ (40%) e pela nota dos IVs (60%): o IV do ataque da espécie e o de SPD pesam mais">Na loja: o melhor</th><th>O mais barato</th>' : ''}</tr>
         ${sugs.map((s, i) => {
           const porque = [];
           if (s.respostas.length) porque.push('ganha de ' + s.respostas.map((v) => `${esc(v.nome)} (${pct(v.taxa)} em ${nf(0).format(v.partidas)})`).join(', '));
@@ -963,12 +963,12 @@ const curto = (v) => (v >= 1e9 ? `${nf(2).format(v / 1e9)} bi` : v >= 1e6 ? `${n
 const OBJETIVOS_PK = {
   equilibrado: 'equilibrado: bom de caça e com preço justo',
   xp: 'mais XP por hora caçando (simula a melhor hunt)',
-  caca: 'melhor para caçar e upar (maior dano por golpe)',
+  caca: 'melhor para caçar e upar (dano com o ataque da espécie e o SPD)',
   forte: 'o maior ⚔ do jogo (soma dos 6 atributos)',
   barganha: 'o maior desconto vs preço justo',
   custo: 'mais dano de caça por gema/coin',
   nota: 'a maior nota',
-  pvp: 'melhor para PvP (meta do rank + contra quem você perde)',
+  pvp: 'melhor para PvP (meta do rank + contra quem você perde + IVs de ataque e SPD)',
   ponte: 'transferir gemas entre contas: o melhor Pokémon no piso de preço',
 };
 // O texto de baixo do formulário muda com o objetivo: a ponte pede o passo a passo.
@@ -1019,6 +1019,20 @@ function mostrarSubPk(sub) {
 
 const tagsTipo = (tipos) => (tipos || []).map((t) => `<span class="tipo-tag">${esc(TIPOS_PK[t] || t)}</span>`).join('');
 
+
+// IVs individuais (pokemon.nota_ivs): o IV do ataque que a espécie usa e o de SPD, com os horríveis em vermelho.
+const NOME_LADO_IV = { físico: 'ATQ', especial: 'SP.ATQ', misto: 'ATQ/SP.ATQ' };
+function htmlIvsChave(n) {
+  if (!n) return '';
+  const v = (k, rot) => `<span class="${n.ruins.includes(k) ? 'margem-neg' : ''}">${rot} ${n[k]}</span>`;
+  return `${v('ataque', NOME_LADO_IV[n.lado] || 'ATQ')} · ${v('speed', 'SPD')}`;
+}
+function tituloIvs(x) {
+  const n = x.ivs_nota;
+  const todos = Object.entries(x.ivs || {}).map(([k, v]) => k + ' ' + v).join(' · ');
+  if (!n) return `IVs: ${todos}`;
+  return `IVs: ${todos} | nota dos IVs ${nf(1).format(n.nota)}/10 (ataque ${n.lado}): pesa 40% o IV de ataque da espécie, 30% o de SPD e 10% cada HP, DEF e SP.DEF; um IV de ataque ou SPD abaixo de 11 castiga a nota${n.ruins.length ? ' (este tem ' + n.ruins.map((k) => (k === 'speed' ? 'SPD' : 'ataque')).join(' e ') + ' horrível)' : ''}`;
+}
 async function buscarPk(e) {
   e?.preventDefault();
   const moeda = $('#pkb-moeda').value;
@@ -1043,15 +1057,15 @@ async function buscarPk(e) {
   $('#pkb-ponte').classList.toggle('hidden', d.objetivo !== 'ponte');
   if (d.objetivo === 'ponte') $('#pkb-ponte').innerHTML = resumoPonte(d.ponte, m);
   $('#pkb-tabela').innerHTML = `
-    <tr><th>#</th><th>Pokémon</th><th class="num">Nv</th><th class="num">P</th><th class="num">IV</th><th class="num">Qual.</th><th class="num">Nota</th>
+    <tr><th>#</th><th>Pokémon</th><th class="num">Nv</th><th class="num">P</th><th class="num" title="Soma dos IVs e, embaixo, o IV do ataque que a espécie usa e o de SPD (em vermelho, abaixo de 11). Passe o mouse na linha para ver todos e a nota dos IVs.">IV</th><th class="num">Qual.</th><th class="num">Nota</th>
       <th class="num" title="⚔ do jogo: a soma dos 6 atributos em escala de log (a régua do ranking)">Poder</th>
-      <th class="num" title="Dano de um golpe na caça: (2 × nível ÷ 5 + 2) × o maior entre ATK e SP.ATK, ÷ 100. É o que decide quem mata mais rápido.">Caça</th>
+      <th class="num" title="Dano na caça: (2 × nível ÷ 5 + 2) × o ataque que a espécie usa (ATK nos golpes físicos, SP.ATK nos especiais), × a cadência do IV de SPD (1 no IV 16), ÷ 100. É o que decide quem mata mais rápido.">Caça</th>
       <th class="num" title="XP por hora na melhor hunt liberada para o seu nível de treinador, sem bônus, AoE, TM, bike ou casa. Passe o mouse no número para ver a hunt.">XP/h</th><th class="num">Preço</th><th class="num">Preço justo</th><th class="num">Desconto</th><th>Confiança</th>
       <th class="num">Lucro revendendo</th><th>Vendedor</th></tr>
-    ${d.itens.map((x, i) => `<tr title="IVs: ${Object.entries(x.ivs).map(([k, v]) => k + ' ' + v).join(' · ')}${x.faixa ? ` | vendas parecidas entre ${fmtNum(x.faixa[0], m)} e ${fmtNum(x.faixa[1], m)}` : ''}">
+    ${d.itens.map((x, i) => `<tr title="${esc(tituloIvs(x))}${x.faixa ? ` | vendas parecidas entre ${fmtNum(x.faixa[0], m)} e ${fmtNum(x.faixa[1], m)}` : ''}">
       <td>${i + 1}</td>
       <td style="white-space:normal">${esc(x.especie)} ${x.shiny ? '<span class="tag shiny">shiny</span>' : ''}${x.tm ? ' <span class="tag">TM</span>' : ''}${x.nota_pvp != null ? ` <span class="tag" title="Nota de PvP da espécie (0 a 1): meta do high elo e as suas ameaças">PvP ${nf(2).format(x.nota_pvp)}</span>` : ''}<br>${tagsTipo(x.tipos)}</td>
-      <td class="num">${nf(0).format(x.nivel ?? 0)}</td><td class="num">${x.potencia ?? '—'}</td><td class="num">${x.iv ?? '—'}</td>
+      <td class="num">${nf(0).format(x.nivel ?? 0)}</td><td class="num">${x.potencia ?? '—'}</td><td class="num" style="white-space:nowrap">${x.iv ?? '—'}${x.ivs_nota ? `<br><span class="aviso">${htmlIvsChave(x.ivs_nota)}</span>` : ''}</td>
       <td class="num">${x.qualidade != null ? nf(3).format(x.qualidade) : '—'}</td><td class="num">${x.nota != null ? nf(3).format(x.nota) : '—'}</td>
       <td class="num">${nf(0).format(x.poder ?? 0)}</td>
       <td class="num" title="${x.ataque ? 'ataque ' + x.ataque : ''}">${x.caca != null ? nf(0).format(x.caca) : '—'}</td>

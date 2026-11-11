@@ -17,11 +17,14 @@ pesam tanto quanto o ataque) e passa a soma por uma escala de log (shared/nota-p
 poder = nível × 10 × score, com o score em log entre o pior e o melhor nascimento). Um Pokémon com o
 dobro do ATK sai com um ⚔ só ~30% maior. Na caça o que decide é o dano por golpe, que no jogo é
 ((2·nível/5 + 2) · poder do golpe · ATK / DEF) / 50 + 2, com ATK ou SP.ATK conforme o golpe. Por isso
-a busca usa o `indice_caca` (dano de um golpe, sem o golpe e a defesa do alvo, que são iguais para
-todos) para "caçar", "equilibrado" e "custo"; o ⚔ fica no objetivo "forte".
+a busca usa o `indice_caca` (dano de um golpe com o ataque que a espécie usa, × a cadência do IV de SPD,
+sem o golpe e a defesa do alvo, que são iguais para todos) para "caçar", "equilibrado" e "custo"; o ⚔ fica
+no objetivo "forte". No PvP, a soma dos IVs também engana: `nota_ivs` pesa o IV de ataque da espécie e o de
+SPD e castiga um horrível.
 """
 from __future__ import annotations
 
+import bisect
 import json
 import math
 import statistics
@@ -50,16 +53,21 @@ PISO_K = 10
 FOLGA_PONTE = 0.15
 MIN_PONTE = 30
 TETO_PONTE = 1.5
+# Objetivos "pvp" e "ponte": a espécie no meta pesa mais que o indivíduo; no indivíduo, os IVs (ver nota_ivs)
+# pesam mais que o ⚔.
+PESO_PVP_ESPECIE = 0.6
+PESO_PVP_PODER = 0.15
+PESO_PVP_IVS = 0.25
 
 OBJETIVOS = {
     "equilibrado": "bom de caça e com preço justo (60% dano de caça, 40% desconto)",
     "xp": "mais XP por hora caçando (a melhor hunt liberada para o seu nível de treinador)",
-    "caca": "melhor para caçar e upar: maior dano por golpe (nível × ATK ou SP.ATK)",
+    "caca": "melhor para caçar e upar: maior dano (nível × o ataque da espécie × a cadência do IV de SPD)",
     "forte": "o maior ⚔ do jogo (a soma dos 6 atributos, a régua do ranking)",
     "barganha": "o maior desconto contra o preço justo",
     "custo": "mais dano de caça por cada gema/coin gasta",
     "nota": "a maior nota",
-    "pvp": "melhor para PvP: espécie forte no meta do rank (e contra quem você perde, com nick) + poder",
+    "pvp": "melhor para PvP: espécie forte no meta do rank (e contra quem você perde, com nick) + IVs de ataque e SPD + poder",
     "ponte": "transferir gemas entre contas: o melhor Pokémon (para PvP) no piso de preço",
 }
 
@@ -68,22 +76,126 @@ FX_NIVEL = [99, 100, 200, 500, 1000, 10**9]                 # < 100 | 100 | 101-
 FX_NOTA = [3.4999, 3.6999, 3.8999, 4.0999, 4.2999, 9]
 
 
-def indice_caca(nivel, stats) -> tuple[float, str] | tuple[None, None]:
-    """Dano de um golpe na caça, sem o que é igual para todos (poder do golpe, DEF do alvo, STAB).
+# ------ IVs individuais
+# A soma dos IVs (e o ⚔, que soma os seis stats) esconde um Pokémon "bom em tudo" com o IV de ataque ou de
+# SPD horrível. Na caça e no PvP, os dois que mais pesam são:
+#   - o IV do ataque que a espécie usa (ATK para golpes físicos, SP.ATK para especiais): entra no stat como
+#     2·IV, então de IV 1 a 32 são +62 pontos de base, ~+40% de dano numa espécie de base 100;
+#   - o IV de SPD: o intervalo entre golpes e a recarga da Investida caem 10 ms por ponto e a recarga dos
+#     golpes cai até 7%. De IV 1 a 32 o Pokémon bate ~1/3 mais vezes por segundo.
+# HP, DEF e SP.DEF seguram o Pokémon vivo no PvP e valem menos; o ataque que a espécie não usa vale zero.
+PESO_IV = {"ataque": 0.40, "speed": 0.30, "hp": 0.10, "def": 0.10, "spDef": 0.10}
+# Um IV abaixo de IV_RUIM num stat-chave (ataque ou SPD) é "horrível": além de pesar pouco na média, tira até
+# CASTIGO_IV da nota (IV 1 tira 40%, IV 10 tira 4%). Dois horríveis castigam os dois (multiplicam).
+IV_RUIM = 11
+CASTIGO_IV = 0.40
+IV_MAX = 32
+# Índice de caça: a cadência pelo IV de SPD, em relação ao IV médio (16). O tempo entre golpes é, em média,
+# o meio caminho entre o intervalo (0,9 s) e a recarga da Investida (2 s), os dois −10 ms por IV de SPD.
+# É uma aproximação: o XP/h (analise/caca.py) faz a luta golpe a golpe.
+_PASSO_MEDIO_S = (caca.GAP_S + caca.INVESTIDA_CD_S) / 2
+_IV_SPD_MEDIO = 16
 
-    Da fórmula de dano do jogo: (2·nível/5 + 2) × ATK ou SP.ATK (o maior: o jogo usa, entre os golpes
-    prontos, o que tira mais dano). Os stats do anúncio já vêm no nível dele, com IV, qualidade,
-    potência e shiny. Devolve (índice, "físico"|"especial"); dividido por 100 para ficar legível.
+_lado_cache: dict = {}
+
+
+_MOTOR_AGORA = object()
+
+
+def lado_fisico(species_id, nivel, stats=None, m=_MOTOR_AGORA) -> float:
+    """Quanto da força da espécie vem de golpes físicos (0 = só especial, 1 = só físico).
+
+    Pelos golpes do catálogo que o nível já liberou, cada um pesando o poder por segundo de recarga (o jogo
+    usa o golpe pronto que tira mais dano, então os fortes e rápidos é que contam). Sem catálogo, o maior
+    entre ATK e SP.ATK do próprio Pokémon. Num laço, passe o motor (`m`, ou None sem catálogo) para não
+    conferir os arquivos do jogo a cada anúncio.
     """
-    if isinstance(stats, str):
+    if m is _MOTOR_AGORA:
         try:
-            stats = json.loads(stats or "{}")
+            m = caca.motor()
+        except caca.SemDados:
+            m = None
+    chave = (id(m), int(species_id or 0), int(nivel or 0))
+    if m is not None and chave in _lado_cache:
+        return _lado_cache[chave]
+    e = m.especie(species_id) if m and species_id else None
+    f = None
+    if e:
+        fis = esp = 0.0
+        for poder, _t, fisico, cd, ll in e["g"]:
+            if ll <= (nivel or 1) and poder > 0:
+                w = poder / max(1.0, cd / 1000)
+                if fisico:
+                    fis += w
+                else:
+                    esp += w
+        f = fis / (fis + esp) if fis + esp else (1.0 if e["b"][1] >= e["b"][3] else 0.0)
+        if len(_lado_cache) > 50_000:
+            _lado_cache.clear()
+        _lado_cache[chave] = f
+    if f is None:
+        st = _json(stats, {})
+        f = 1.0 if (st.get("atk") or 0) >= (st.get("spAtk") or 0) else 0.0
+    return f
+
+
+def _json(v, padrao):
+    if isinstance(v, str):
+        try:
+            return json.loads(v or "null") or padrao
         except ValueError:
-            stats = {}
-    atk, spa = (stats or {}).get("atk") or 0, (stats or {}).get("spAtk") or 0
+            return padrao
+    return v or padrao
+
+
+def _nome_lado(f: float) -> str:
+    return "físico" if f >= 0.65 else "especial" if f <= 0.35 else "misto"
+
+
+def nota_ivs(ivs, fisico: float) -> dict | None:
+    """Nota de 0 a 10 dos IVs individuais, pesando o ataque da espécie e o SPD (ver PESO_IV e IV_RUIM).
+
+    `fisico` vem de `lado_fisico`: numa espécie mista o IV de ataque é a média dos dois, pelo peso de cada
+    lado. Devolve a nota, o lado, os IVs-chave e quais deles são horríveis.
+    """
+    ivs = _json(ivs, {})
+    if not ivs:
+        return None
+    iv = lambda k: min(IV_MAX, max(1, int(ivs.get(k) or 1)))  # noqa: E731
+    ataque = fisico * iv("atk") + (1 - fisico) * iv("spAtk")
+    vals = {"ataque": ataque, "speed": iv("speed"), "hp": iv("hp"), "def": iv("def"), "spDef": iv("spDef")}
+    nota = sum(PESO_IV[k] * (v - 1) / (IV_MAX - 1) for k, v in vals.items())
+    ruins = []
+    for k in ("ataque", "speed"):
+        if vals[k] < IV_RUIM:
+            nota *= 1 - CASTIGO_IV * (IV_RUIM - vals[k]) / (IV_RUIM - 1)
+            ruins.append(k)
+    return {"nota": round(10 * nota, 1), "lado": _nome_lado(fisico), "ataque": round(ataque), "speed": vals["speed"],
+            "ruins": ruins}
+
+
+def indice_caca(nivel, stats, ivs=None, fisico: float | None = None) -> tuple[float, str] | tuple[None, None]:
+    """Dano por golpe na caça, sem o que é igual para todos (poder do golpe, DEF do alvo, STAB), × cadência.
+
+    Da fórmula de dano do jogo: (2·nível/5 + 2) × o ataque que a espécie usa. Com `fisico` (de
+    `lado_fisico`), é ATK × fisico + SP.ATK × (1 − fisico); sem, o maior dos dois. Os stats do anúncio já
+    vêm no nível dele, com IV, qualidade, potência e shiny. Com `ivs`, multiplica pela cadência do IV de SPD
+    (1 no IV 16, ~0,9 no IV 1 e ~1,14 no IV 32). Devolve (índice, "físico"|"especial"|"misto"); ÷ 100 para
+    ficar legível.
+    """
+    stats = _json(stats, {})
+    atk, spa = stats.get("atk") or 0, stats.get("spAtk") or 0
     if not nivel or not (atk or spa):
         return None, None
-    return round((2 * nivel / 5 + 2) * max(atk, spa) / 100, 1), ("físico" if atk >= spa else "especial")
+    if fisico is None:
+        fisico = 1.0 if atk >= spa else 0.0
+    ataque = fisico * atk + (1 - fisico) * spa
+    ivs = _json(ivs, {})
+    cadencia = 1.0
+    if ivs.get("speed"):
+        spd = min(IV_MAX, max(1, int(ivs["speed"])))
+        cadencia = (_PASSO_MEDIO_S - caca.S_POR_IV_SPD * _IV_SPD_MEDIO) / (_PASSO_MEDIO_S - caca.S_POR_IV_SPD * spd)
+    return round((2 * nivel / 5 + 2) * ataque * cadencia / 100, 1), _nome_lado(fisico)
 
 
 def _faixa(v, tetos):
@@ -256,6 +368,11 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
             ponte = {"piso": piso, "teto": round(args[1], 2), "folga_pct": round(FOLGA_PONTE * 100)}
     linhas = con.execute(f"SELECT * FROM pk_anuncios WHERE {' AND '.join(filtro)}", args).fetchall()
     comps = comparaveis(con)
+    try:
+        motor = caca.motor()
+        aviso_xp = None
+    except caca.SemDados as e:
+        motor, aviso_xp = None, str(e)
     res = []
     for r in linhas:
         j = comps.preco_justo(r["especie"], r["shiny"], moeda, r["nivel"], r["nota"], r["potencia"])
@@ -275,7 +392,9 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
         else:
             item.update(justo=None, comps=0, confianca=None, metodo=None, desconto=None, revenda_liquida=None, lucro_revenda=None)
         item["poder_por_preco"] = (r["poder"] or 0) / preco if preco else 0
-        item["caca"], item["ataque"] = indice_caca(r["nivel"], r["stats"])
+        f = lado_fisico(r["species_id"], r["nivel"], r["stats"], motor)
+        item["caca"], item["ataque"] = indice_caca(r["nivel"], r["stats"], r["ivs"], f)
+        item["ivs_nota"] = nota_ivs(r["ivs"], f)
         item["caca_por_preco"] = (item["caca"] or 0) / preco if preco else 0
         item["_ficha"] = (r["species_id"], r["nivel"], r["stats"], r["ivs"], r["tipos"])
         res.append(item)
@@ -283,11 +402,6 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
     # XP/h (analise/caca.py): ~5 ms por anúncio, então só para quem precisa. No objetivo "xp", o funil: os
     # FUNIL_XP melhores pelo índice de caça (quem mais bate é quem pode caçar mais alto). Nos outros, só os
     # que aparecem na lista.
-    try:
-        motor = caca.motor()
-        aviso_xp = None
-    except caca.SemDados as e:
-        motor, aviso_xp = None, str(e)
 
     def com_xp(lista):
         for x in lista:
@@ -300,7 +414,7 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
     def pct(chave):
         vals = sorted(x[chave] for x in res if x[chave] is not None)
         n = len(vals)
-        return (lambda v: 0.5 if v is None or n < 2 else (vals.index(v) if v in vals else 0) / (n - 1))
+        return (lambda v: 0.5 if v is None or n < 2 else bisect.bisect_left(vals, v) / (n - 1))
 
     if objetivo == "xp":
         res.sort(key=lambda x: -(x["caca"] or 0))
@@ -322,10 +436,15 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
         # A espécie pesa mais que o indivíduo: um P5 de uma espécie fraca no PvP perde para um P3 do meta.
         # Na ponte, o Pokémon fica na conta que mandou as gemas e vai para o PvP dela (revender um de piso
         # não sai): entre os baratos, o mais decente, com o índice de caça e o preço de desempate.
-        p_poder = pct("poder")
+        # O indivíduo (40%) não é só o ⚔: o ⚔ soma os seis stats e não vê um ataque ou um SPD horrível, que no
+        # PvP decidem a luta. Por isso a nota dos IVs (ataque da espécie e SPD, com castigo) pesa mais que ele.
+        for x in res:
+            x["_nota_ivs"] = x["ivs_nota"]["nota"] if x["ivs_nota"] else None
+        p_poder, p_ivs = pct("poder"), pct("_nota_ivs")
         for x in res:
             x["nota_pvp"] = round((pesos_pvp or {}).get(x["species_id"], 0.0), 3)
-            x["pontos"] = round(0.6 * x["nota_pvp"] + 0.4 * p_poder(x["poder"]), 3)
+            x["pontos"] = round(PESO_PVP_ESPECIE * x["nota_pvp"] + PESO_PVP_PODER * p_poder(x["poder"])
+                                + PESO_PVP_IVS * p_ivs(x["_nota_ivs"]), 3)
         res.sort(key=lambda x: (-x["pontos"], -(x["caca"] or 0), x["preco"]))
     else:  # equilibrado
         p_caca, p_desc = pct("caca"), pct("desconto")
@@ -340,6 +459,7 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
         com_xp(res)
     for x in res:
         x.pop("_ficha", None)
+        x.pop("_nota_ivs", None)
     if ponte is not None:
         ponte.update(_conta_ponte(transferir, res[0] if res else None, moeda, coins_por_gema))
     snap = con.execute("SELECT MAX(snap_ms) FROM pk_varreduras").fetchone()[0]

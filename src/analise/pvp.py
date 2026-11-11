@@ -18,6 +18,7 @@ A análise, para um nick:
 """
 from __future__ import annotations
 
+import bisect
 import json
 import threading
 import time
@@ -340,12 +341,40 @@ def analisar(con, nick: str, faixa: str = "", orcamento: float | None = None, mo
 
 
 def _anuncios(con, sugestoes: list[dict], orcamento: float, moeda: str) -> None:
-    """Os anúncios ativos de cada espécie sugerida que cabem no orçamento: o mais forte e o mais barato."""
+    """Os anúncios ativos de cada espécie sugerida que cabem no orçamento: o melhor e o mais barato.
+
+    "O melhor" não é só o maior ⚔: dentro da espécie, 40% o percentil do ⚔ e 60% o da nota dos IVs
+    (`pokemon.nota_ivs`: o ataque que a espécie usa e o SPD, com castigo para um horrível), na mesma
+    proporção do objetivo "pvp" da busca.
+    """
+    from analise import caca, pokemon
+    w_poder = pokemon.PESO_PVP_PODER / (pokemon.PESO_PVP_PODER + pokemon.PESO_PVP_IVS)
+    try:
+        motor = caca.motor()
+    except caca.SemDados:
+        motor = None
     for s in sugestoes:
-        rows = con.execute("""SELECT id, especie, nivel, shiny, nota, poder, potencia, preco, vendedor FROM pk_anuncios
-                              WHERE ativo = 1 AND species_id = ? AND moeda = ? AND preco <= ?
-                              ORDER BY poder DESC LIMIT 40""", (s["id"], moeda, orcamento)).fetchall()
-        anuncios = [dict(r) for r in rows]
+        rows = con.execute("""SELECT id, especie, species_id, nivel, shiny, nota, poder, potencia, ivs, stats, preco, vendedor
+                              FROM pk_anuncios WHERE ativo = 1 AND species_id = ? AND moeda = ? AND preco <= ?""",
+                           (s["id"], moeda, orcamento)).fetchall()
+        anuncios = []
+        for r in rows:
+            a = dict(r)
+            iv = pokemon.nota_ivs(a.pop("ivs"), pokemon.lado_fisico(a["species_id"], a["nivel"], a.pop("stats"), motor))
+            a["ivs_nota"] = iv
+            anuncios.append(a)
+        if anuncios:
+            def pct(vals):
+                ordem = sorted(vals)
+                n = len(ordem)
+                return [0.5 if n < 2 else bisect.bisect_left(ordem, v) / (n - 1) for v in vals]
+            pp = pct([a["poder"] or 0 for a in anuncios])
+            pi = pct([a["ivs_nota"]["nota"] if a["ivs_nota"] else 0 for a in anuncios])
+            for a, x, y in zip(anuncios, pp, pi):
+                a["_pontos"] = w_poder * x + (1 - w_poder) * y
+            anuncios.sort(key=lambda a: (-a["_pontos"], -(a["poder"] or 0), a["preco"]))
+            for a in anuncios:
+                a.pop("_pontos")
         s["anuncios"] = len(anuncios)
         s["mais_forte"] = anuncios[0] if anuncios else None
         s["mais_barato"] = min(anuncios, key=lambda r: r["preco"]) if anuncios else None
