@@ -464,14 +464,14 @@ class Handler(BaseHTTPRequestHandler):
                     num = lambda k, d=0: float(q[k]) if q.get(k, "").strip() else d  # noqa: E731
                     objetivo = q.get("objetivo", "equilibrado")
                     pesos, extra = None, {}
-                    if objetivo == "pvp":
-                        pesos = pvp.pesos_especies(con, q.get("pvp_faixa", "alto")[:12], q.get("pvp_nick", "").strip()[:20])
-                    elif objetivo == "ponte":
-                        # Sem o Tracker a ponte ainda serve (ordena pelo ⚔); só avisa.
+                    if objetivo in ("pvp", "ponte"):
                         try:
                             pesos = pvp.pesos_especies(con, q.get("pvp_faixa", "alto")[:12], q.get("pvp_nick", "").strip()[:20])
                         except pvp.ErroPvP as e:
-                            extra["aviso_pvp"] = str(e)
+                            if objetivo == "pvp":
+                                raise
+                            extra["aviso_pvp"] = str(e)  # sem o Tracker a ponte ainda serve (ordena pelo ⚔)
+                    if objetivo == "ponte":
                         extra["transferir"] = num("transferir")
                         extra["coins_por_gema"] = venda.cambio(con)["coins_por_gema"]
                     return self._json(analise_pokemon.buscar(

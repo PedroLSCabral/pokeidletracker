@@ -318,16 +318,10 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
         res.sort(key=lambda x: -x["caca_por_preco"])
     elif objetivo == "nota":
         res.sort(key=lambda x: (-(x["nota"] or 0), x["preco"]))
-    elif objetivo == "pvp":
+    elif objetivo in ("pvp", "ponte"):
         # A espécie pesa mais que o indivíduo: um P5 de uma espécie fraca no PvP perde para um P3 do meta.
-        p_poder = pct("poder")
-        for x in res:
-            x["nota_pvp"] = round((pesos_pvp or {}).get(x["species_id"], 0.0), 3)
-            x["pontos"] = round(0.6 * x["nota_pvp"] + 0.4 * p_poder(x["poder"]), 3)
-        res.sort(key=lambda x: -x["pontos"])
-    elif objetivo == "ponte":
-        # O Pokémon fica na conta que mandou as gemas e vai para o PvP dela (revender um de piso não sai): entre os
-        # baratos, o mais decente. Mesma conta do "pvp"; o índice de caça desempata e, depois, o preço.
+        # Na ponte, o Pokémon fica na conta que mandou as gemas e vai para o PvP dela (revender um de piso
+        # não sai): entre os baratos, o mais decente, com o índice de caça e o preço de desempate.
         p_poder = pct("poder")
         for x in res:
             x["nota_pvp"] = round((pesos_pvp or {}).get(x["species_id"], 0.0), 3)
