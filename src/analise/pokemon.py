@@ -40,10 +40,13 @@ MIN_GRUPO = 3             # vendas da espécie (mesmo shiny e moeda) para ter um
 DIARIA_ANUNCIO_COINS = 100_000
 FUNIL_XP = 200            # objetivo "xp": só os N melhores pelo índice de caça passam pela conta de XP/h
 # Objetivo "ponte" (levar gemas de uma conta para a outra comprando e revendendo um Pokémon de piso).
-# Candidatos: até FOLGA_PONTE acima do menor anúncio ativo (com os filtros). No piso em coins há centenas
-# de anúncios entre ~45 e ~50 mi, então 15% pega o piso inteiro sem chegar nos Pokémon "de verdade". Se o
-# piso tiver poucos anúncios (uma espécie filtrada, shiny), o teto sobe até o MIN_PONTE-ésimo mais barato,
-# mas nunca passa de TETO_PONTE × o piso: um piso isolado não pode virar "qualquer preço".
+# Candidatos: até FOLGA_PONTE acima do piso. O piso é a mediana dos PISO_K anúncios ativos mais baratos
+# (com os filtros), e não o menor: em 11/2026 havia um anúncio isolado a 150 mil coins com o bloco do piso
+# em 55-60 mi, e o menor sozinho deixava o bloco todo de fora. Anúncios abaixo do piso continuam entrando.
+# 15% acima do bloco pega o piso inteiro sem chegar nos Pokémon "de verdade". Se houver poucos anúncios
+# (uma espécie filtrada, shiny), o teto sobe até o MIN_PONTE-ésimo mais barato, mas nunca passa de
+# TETO_PONTE × o piso.
+PISO_K = 10
 FOLGA_PONTE = 0.15
 MIN_PONTE = 30
 TETO_PONTE = 1.5
@@ -247,10 +250,10 @@ def buscar(con, orcamento: float, moeda: str = "gems", objetivo: str = "equilibr
         sem_orc = [a for i, a in enumerate(args) if i != 1]
         precos = [r[0] for r in con.execute(f"SELECT preco FROM pk_anuncios WHERE {onde} AND preco > 0 ORDER BY preco", sem_orc)]
         if precos:
-            piso = precos[0]
+            piso = statistics.median(precos[:PISO_K])
             teto = max(piso * (1 + FOLGA_PONTE), min(precos[min(MIN_PONTE, len(precos)) - 1], piso * TETO_PONTE))
             args[1] = min(orcamento, teto)
-            ponte = {"piso": piso, "teto": args[1], "folga_pct": round(FOLGA_PONTE * 100)}
+            ponte = {"piso": piso, "teto": round(args[1], 2), "folga_pct": round(FOLGA_PONTE * 100)}
     linhas = con.execute(f"SELECT * FROM pk_anuncios WHERE {' AND '.join(filtro)}", args).fetchall()
     comps = comparaveis(con)
     res = []
