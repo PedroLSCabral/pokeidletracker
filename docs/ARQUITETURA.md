@@ -68,6 +68,7 @@ pokeidletracker/
 │  │  ├─ pokemon.py         preço justo de Pokémon, busca por orçamento, padrões do mercado
 │  │  ├─ caca.py            XP por hora de caça de um Pokémon (motor rápido) e os dados do jogo que ele usa
 │  │  ├─ evolucao.py        análise de um Pokémon só até a evolução final (nota, XP/h nível a nível, preço)
+│  │  ├─ precificar.py      preço de venda de um Pokémon (rápido/normal/paciente) e até que nível vale evoluir/subir
 │  │  └─ pvp.py             aba PvP (Tracker público do jogo)
 │  └─ web/                  a página do painel
 │     ├─ index.html         estrutura das abas e janelas
@@ -287,7 +288,7 @@ Todas as rotas GET aceitam `moeda=gems|coins` (o padrão é gems).
 | `GET /api/pokemon?busca=&shiny=&limite=` | `api_pokemon` | Vendas recentes de Pokémon |
 | `GET /api/pk/buscar?orcamento=&objetivo=&especie=&tipo=&pmin=&nivel=&nota=&shiny=&treinador=&pvp_nick=&pvp_faixa=&transferir=` | `pokemon.buscar` (+ `pvp.pesos_especies` se `objetivo` é `pvp` ou `ponte`; + `venda.cambio` se `ponte`) | Anúncios da loja ordenados pelo objetivo, com o XP/h de cada um (`xp_h`, `xp_hunt`) para o nível de treinador `treinador`. Com `objetivo=ponte`, traz `ponte` (piso, teto e, com `transferir` em gemas, a comissão, quanto recebe e o custo total) e `aviso_pvp` se o Tracker falhou |
 | `GET /api/pk/padroes?dias=` | `pokemon.padroes` | Padrões do mercado de Pokémon |
-| `GET /api/pk/evolucao?anuncio=` ou `?especie=&nivel=&qualidade=&potencia=&shiny=&hp=&atk=&def=&spAtk=&spDef=&speed=` (+ `&treinador=&alvo=`; da ficha colada também `especie_id`, `st_<stat>`, `nota`, `poder`, `refino`) | `api_evolucao` → `evolucao.analisar` | Um Pokémon (anúncio da loja ou ficha digitada) agora e em cada evolução final: nota projetada, stats, ⚔, XP/h, trilha nível a nível com o tempo e o preço justo |
+| `GET /api/pk/evolucao?anuncio=` ou `?especie=&nivel=&qualidade=&potencia=&shiny=&hp=&atk=&def=&spAtk=&spDef=&speed=` (+ `&treinador=&alvo=&valor_hora=`; da ficha colada também `especie_id`, `st_<stat>`, `nota`, `poder`, `refino`) | `api_evolucao` → `evolucao.analisar` (trilha esticada até `precificar.horizonte`) + `precificar.precificar` | Um Pokémon (anúncio da loja ou ficha digitada) agora e em cada evolução final: nota projetada, stats, ⚔, XP/h, trilha nível a nível com o tempo e o preço justo. Em `precificacao`: os preços de venda de agora e, por evolução final (ou `subir`, se já é a última forma), o valor em cada nível e o melhor ponto para vender |
 | `GET /api/pk/especies` | `evolucao.especies` | Espécies do catálogo (com arte, sem mega) para o formulário, com `evolui` |
 | `GET /api/pvp?nick=&faixa=&orcamento=&moeda=&forcar=` | `pvp.analisar` | Aba PvP inteira. `forcar=1` relê o seu perfil e o meta sem esperar o cache |
 | `GET /api/status` | `api_status` → `coletor.status` | Estado da coleta e as últimas linhas do log |
@@ -379,6 +380,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
 ### `analise/pokemon.py` (Fase 4)
 - **`Comparaveis`** dá o preço justo de um Pokémon.
   - Com 5 ou mais vendas parecidas (mesma espécie, shiny, moeda, faixa de nível e de nota), usa a mediana delas.
+  - As faixas: nível `FX_NIVEL` (<100, 100, 101-200, 201-500, 501-1000, 1000+) e nota `FX_NOTA` (3,5 / 3,7 / 3,9 / 4,1 / 4,3 / 4,5 / 5 / 6). As de nota acima de 4,3 entraram em 11/2026: antes uma nota 4,35 e uma nota 6 caíam na mesma faixa.
   - Senão, usa o modelo de multiplicadores em log: base da espécie × nível × nota × potência, ajustado por backfitting.
   - Uma espécie cujas vendas saem todas como fora da curva no 2º ajuste fica sem preço base: `preco_justo` confere `(especie, shiny) in base` antes de usar o modelo.
 - **`taxa_venda`** calcula a comissão progressiva do jogo para Pokémon.
@@ -421,6 +423,17 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   - devolve `atual` e `finais` (um por evolução final, a melhor nota primeiro), com `caminho`, `nota`, `mercado_ok`, `na_evolucao`, `no_alvo`, `horas_ate_evoluir`, `horas_ate_alvo`, `trilha` e o preço justo (`Comparaveis.preco_justo` da forma final, no nível e na nota projetada);
   - avisa quando o Pokémon tem refino (a nota projetada usa as bases sem ele) e quando a trilha passa do nível do treinador + 5 (o limite do jogo para lutar).
 - **Medido (11/2026):** a nota calculada bate com a do jogo (|dif| < 0,002) em 26.414 de 26.671 anúncios sem refino, todos os que não são mega; o ⚔ também. As megas divergem porque o catálogo guarda nelas as bases da forma base (as próprias estão em `shared/megas.mjs`, que não é baixado), então para uma mega a análise usa a nota do anúncio. Larvitar → Tyranitar com 28 pontos leva ~0,2 s; Eevee (8 finais) até o Nv 500, ~1 s.
+
+### `analise/precificar.py` (preço de venda de um Pokémon e até que nível vale subir)
+- **Para que serve:** o "botão vender" dos Pokémon. Junta o preço justo (`Comparaveis`), a loja (`pk_anuncios`), a comissão (`taxa_venda`), o câmbio (`venda.cambio`) e a trilha da evolução. A explicação completa está no topo do arquivo.
+- **`precos_agora` / `precos_moeda`:** três preços por moeda (shiny só gemas), cada um com a comissão e o líquido (em gemas, já com 1 diária de anúncio):
+  - *rápido:* 1 passo abaixo do anúncio parecido mais barato (mesma espécie, shiny, moeda e faixas de nível e nota), sem passar do justo nem descer do piso (p10 das vendas parecidas; sem elas, 60% do justo);
+  - *normal:* o preço justo; *paciente:* o p75 das vendas parecidas, no mínimo justo × 1,15;
+  - os anúncios **melhores** (nível, nota − 0,05 e potência pelo menos iguais) mais baratos formam uma fila: o rápido fica abaixo do 1º, o normal do 2º e o paciente do 3º; o anúncio que está sendo analisado não conta como concorrente;
+  - a moeda segue a regra dos itens: coins só se render `PREFERENCIA_GEMAS` (5%) a mais depois da troca.
+- **`preco_item_gemas`:** custo de uma pedra em gemas, pela rota mais barata (gemas, ou coins pelo câmbio + 15%). As Shiny Stones por tipo não têm mercado próprio e ficam sem preço.
+- **`precificar(con, comps, r, ficha, valor_hora)`:** com o resultado de `evolucao.analisar` (trilha até `horizonte`: treinador + 5, ou o Nv 1001 sem treinador, com pontos em `ENTRADAS_FAIXA`, a entrada de cada faixa de nível do modelo), avalia em cada ponto da trilha já na forma final o ganho = valor líquido pelo justo (o maior visto até ali: subir não barateia) − vender agora pelo preço normal − pedras, e as gemas por hora desde agora. O melhor ponto é o de mais gemas/h, e só "vale" com pelo menos `MIN_GEMAS_H` (1) por hora; com `valor_hora`, o de maior ganho − valor_hora × horas. `pode_vender` aplica a regra do mercado (nível ≥ 50 e nota ≥ 3,5, salvo shiny e P5).
+- **Limites:** o preço anda em degraus (faixas de nível e de nota do modelo), então o melhor ponto costuma cair na entrada de uma faixa; não avalia vender numa forma intermediária; o tempo supõe caçar sem parar.
 
 ### `analise/pvp.py` (aba PvP)
 - **Tipos:** `TABELA` é a tabela de tipos da série, a mesma de `shared/tipo-efetividade.mjs` do jogo. `mult(atq, defesa)` dá o multiplicador e `melhor_ataque(atacante, defensor)` o melhor golpe de mesmo tipo.
@@ -465,7 +478,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   - **aviso sonoro:** `checarAlertasNovos` (polling), `tocar` (WebAudio), `mostrarAviso`;
   - **PvP:** `analisarPvp(e, forcar)` (o botão `#pvp-forcar` manda `forcar=1`), `desenharPvp`, `ligarPvp`, `haQuanto`. O nick fica no `localStorage` (`pvp_nick`);
   - **pokémon:** `mostrarSubPk`, `buscarPk`, `carregarPadroesPk`, `carregarPokemon`, `ligarPokemon`;
-  - **análise com evolução:** `lerFichaJogo` (lê a ficha que o jogo copia, "# Nome — ficha do PokeIdle": espécie com o número, shiny, nível, potência, qualidade, nota, poder e a tabela de stats; um "+N" na coluna da base marca refino) e `colarFicha` (preenche o formulário e analisa, mandando os stats da ficha em `st_*`; mexer no formulário descarta a ficha colada, `fichaColada`), `fichaSimulada` (o botão **Copiar ficha simulada** de cada evolução final, `[data-copiar-ficha]`: a ficha da forma final no nível do campo ao lado, `[data-nivel-ficha]`, montada na página por `formaNoNivel` com os `fatores` e o `score` que a análise devolve, no mesmo modelo que o jogo copia, com `percentilQualidade` do jogo; `lerFichaJogo` lê de volta), `carregarEspeciesPk` (o `datalist` das espécies, carregado ao abrir a sub-aba), `analisarEvolucao(e, anuncio)`, `desenharEvolucao`, `ligarEvolucao`. O botão `[data-evoluir]` de cada linha da busca abre a sub-aba com a ficha do anúncio e a copia para o formulário;
+  - **análise com evolução:** `lerFichaJogo` (lê a ficha que o jogo copia, "# Nome — ficha do PokeIdle": espécie com o número, shiny, nível, potência, qualidade, nota, poder e a tabela de stats; um "+N" na coluna da base marca refino) e `colarFicha` (preenche o formulário e analisa, mandando os stats da ficha em `st_*`; mexer no formulário descarta a ficha colada, `fichaColada`), `fichaSimulada` (o botão **Copiar ficha simulada** de cada evolução final, `[data-copiar-ficha]`: a ficha da forma final no nível do campo ao lado, `[data-nivel-ficha]`, montada na página por `formaNoNivel` com os `fatores` e o `score` que a análise devolve, no mesmo modelo que o jogo copia, com `percentilQualidade` do jogo; `lerFichaJogo` lê de volta), `carregarEspeciesPk` (o `datalist` das espécies, carregado ao abrir a sub-aba), `analisarEvolucao(e, anuncio)`, `desenharEvolucao`, `ligarEvolucao`. A precificação (`precificacao` da mesma resposta) entra por `htmlPrecosVenda` (rápido/normal/paciente por moeda, com a concorrência) e `htmlVale` (o veredito e a tabela do valor em cada nível, com a linha do melhor ponto em `.pkv-melhor`); o campo **Sua hora vale** (`#pke-hora`, lembrado em `pk_valor_hora`) manda `valor_hora`. O botão `[data-evoluir]` de cada linha da busca abre a sub-aba com a ficha do anúncio e a copia para o formulário;
   - **status e navegação:** `carregarStatus`, `mostrarAba`, `ligar()` (liga todos os eventos) e `iniciar()` (carga inicial e os timers de 1 e 5 min).
 - **Regras da página:**
   - todo texto que vem do servidor passa por `esc()` antes de entrar no HTML;

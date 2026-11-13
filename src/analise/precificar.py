@@ -14,13 +14,16 @@ Os três preços, no espírito do botão vender dos itens (`venda.analisar_moeda
     descer do piso (o p10 das vendas parecidas, ou 60% do justo pelo modelo);
   - normal: o preço justo;
   - paciente: o p75 das vendas parecidas (no mínimo o justo + 15%).
-  Os três respeitam o teto dos anúncios melhores e mais baratos.
+  Os anúncios melhores e mais baratos formam uma fila: o rápido fica abaixo do 1º, o normal do 2º e o paciente
+  do 3º (um anúncio melhor isolado e barato demais não derruba os três).
 
 Vale a pena evoluir/subir? O preço de mercado de um Pokémon anda em degraus (o modelo separa o nível nas faixas
 <100, 100, 101-200, 201-500, 501-1000 e 1000+; e a nota sobe na evolução). Em cada ponto da trilha (os mesmos
 pontos da análise de evolução, mais a entrada de cada faixa de nível), o ganho é o valor líquido em gemas
-naquele ponto − o valor líquido de vender agora − as pedras de evolução. O melhor ponto é o de mais gemas por
-hora investida (o tempo é caçando sem parar, do nível de agora até lá). Se você diz quanto vale a sua hora
+naquele ponto (o maior visto até ali: subir não barateia o Pokémon) − o valor líquido de vender agora pelo
+preço normal − as pedras de evolução. O melhor ponto é o de mais gemas por
+hora investida (o tempo é caçando sem parar, do nível de agora até lá), e só "vale" se render pelo menos
+`MIN_GEMAS_H` por hora. Se você diz quanto vale a sua hora
 (`valor_hora`, em gemas), o melhor ponto passa a ser o de maior lucro depois de descontar esse custo. Depois
 do melhor ponto, cada hora a mais rende menos gemas que a média até ali: é onde parar e vender.
 """
@@ -39,6 +42,9 @@ PISO_MODELO = 0.6           # sem vendas parecidas, o rápido não desce de 60% 
 PACIENTE_MIN = 1.15         # o paciente fica pelo menos 15% acima do justo
 FOLGA_NOTA = 0.05           # um anúncio "melhor" pode ter até 0,05 de nota a menos (arredondamento do jogo)
 NIVEL_MAX_SEM_TREINADOR = 1001
+# Sem "sua hora vale", só chama de "vale a pena" o que rende pelo menos isto por hora caçada: subir 360 h para
+# ganhar 0,2 gema/h tecnicamente dá lucro, mas não é recomendação.
+MIN_GEMAS_H = 1.0
 # A entrada de cada faixa de nível do modelo de preço (FX_NIVEL: <100 | 100 | 101-200 | 201-500 | 501-1000 | 1000+).
 ENTRADAS_FAIXA = tuple(t + 1 for t in pokemon.FX_NIVEL[:-1])
 
@@ -119,7 +125,11 @@ def precos_moeda(con, comps, cb, nome, shiny, nivel, nota, potencia, moeda, igno
         if a["nivel"] >= nivel and (a["nota"] or 0) >= (nota or 0) - FOLGA_NOTA and (a["potencia"] or 1) >= potencia:
             melhores.append(a)
     passo = lambda p: venda._passo(p, moeda)  # noqa: E731
-    teto = melhores[0]["preco"] - passo(melhores[0]["preco"]) if melhores else None
+    # A fila dos anúncios melhores: o rápido fica abaixo do 1º, o normal abaixo do 2º e o paciente abaixo do 3º.
+    # Um anúncio melhor isolado e muito barato (já aconteceu) não derruba os três preços juntos.
+    fila = [a["preco"] - passo(a["preco"]) for a in melhores[:3]]
+    tetos = [fila[min(i, len(fila) - 1)] for i in range(3)] if fila else None
+    teto = tetos[0] if tetos else None
     if len(locais) >= pokemon.MIN_LOCAIS:
         piso, alto = _pct(locais, 0.10), max(_pct(locais, 0.75), justo * PACIENTE_MIN)
     else:
@@ -131,8 +141,8 @@ def precos_moeda(con, comps, cb, nome, shiny, nivel, nota, potencia, moeda, igno
     concorrencia_baixa = rapido < piso
     rapido = max(rapido, piso)
     normal, paciente = justo, alto
-    if teto is not None:
-        rapido, normal, paciente = min(rapido, teto), min(normal, teto), min(paciente, teto)
+    if tetos:
+        rapido, normal, paciente = min(rapido, tetos[0]), min(normal, tetos[1]), min(paciente, tetos[2])
     normal = max(normal, rapido)
     paciente = max(paciente, normal)
     vendas_dia = len(locais) / pokemon.JANELA_COMPS_DIAS
@@ -150,7 +160,7 @@ def precos_moeda(con, comps, cb, nome, shiny, nivel, nota, potencia, moeda, igno
         "vendas_parecidas_14d": len(locais), "vendas_dia": round(vendas_dia, 2),
         "anuncios_parecidos": len(parecidos), "menor_parecido": parecidos[0]["preco"] if parecidos else None,
         "anuncios_melhores": len(melhores), "menor_melhor": melhores[0]["preco"] if melhores else None,
-        "teto_melhor": teto is not None and teto < justo, "concorrencia_abaixo_do_piso": concorrencia_baixa,
+        "teto_melhor": teto is not None and teto < justo, "teto_normal": tetos is not None and tetos[1] < justo, "concorrencia_abaixo_do_piso": concorrencia_baixa,
         "opcoes": opcoes,
     }
 
@@ -217,11 +227,17 @@ def preco_item_gemas(con, nome: str, cb: float | None, t: int | None = None) -> 
 
 def _avaliar_trilha(trilha, forma_id, nome, nota, base, custo, ficha, comps, cb, valor_hora) -> dict:
     """Em cada ponto da trilha já na forma `forma_id`, o ganho em gemas e as gemas por hora."""
-    pontos = []
+    pontos, teto_v = [], None
     for p in trilha:
         if p["id"] != forma_id or p["horas"] is None:
             continue
         v = valor_justo_gemas(comps, cb, nome, ficha["shiny"], p["nivel"], nota, ficha["potencia"])
+        # Subir de nível não deixa o Pokémon mais barato: uma faixa de nível que sai abaixo da anterior é ruído
+        # das vendas parecidas (poucas numa faixa), então vale o maior valor visto até ali.
+        if v is not None:
+            if teto_v and teto_v["gemas"] > v["gemas"]:
+                v = teto_v
+            teto_v = v
         ganho = None if v is None else v["gemas"] - base - custo
         h = p["horas"]
         pontos.append({"nivel": p["nivel"], "horas": h, "xp_h": p["xp_h"],
@@ -238,8 +254,8 @@ def _avaliar_trilha(trilha, forma_id, nome, nota, base, custo, ficha, comps, cb,
         com_tempo = [x for x in validos if x["gemas_h"] is not None and x["ganho"] > 0]
         melhor = max(com_tempo, key=lambda x: (x["gemas_h"], -x["nivel"]), default=None)
         if melhor is None:   # sem tempo (o Pokémon já está no ponto): vale se ganha alguma coisa
-            melhor = max((x for x in validos if x["ganho"] > 0), key=lambda x: x["ganho"], default=None)
-        vale = melhor is not None
+            melhor = max((x for x in validos if x["ganho"] > 0 and not x["horas"]), key=lambda x: x["ganho"], default=None)
+        vale = melhor is not None and (melhor["gemas_h"] is None or melhor["gemas_h"] >= MIN_GEMAS_H)
     for x in pontos:
         x["melhor"] = melhor is not None and x is melhor
     primeiro = next((x for x in validos if x["ganho"] > 0), None)
@@ -255,8 +271,14 @@ def precificar(con, comps, r: dict, ficha: dict, valor_hora: float | None = None
     nota_agora = r.get("nota_atual_mercado") or a["nota"]
     an = ficha.get("anuncio") or {}
     agora = precos_agora(con, comps, cb, a["nome"], r["shiny"], a["nivel"], nota_agora, r["potencia"], an.get("id"))
-    base_v = valor_justo_gemas(comps, cb, a["nome"], r["shiny"], a["nivel"], nota_agora, r["potencia"])
-    base = base_v["gemas"] if base_v else 0.0
+    # A base é o que ele rende vendendo agora pelo preço normal (já com a concorrência da loja); sem isso, o justo.
+    base_v = None
+    if agora["moeda"]:
+        o = agora["moedas"][agora["moeda"]]["opcoes"]["normal"]
+        if o["liquido_gemas"] is not None:
+            base_v = {"gemas": o["liquido_gemas"], "moeda": agora["moeda"]}
+    base_v = base_v or valor_justo_gemas(comps, cb, a["nome"], r["shiny"], a["nivel"], nota_agora, r["potencia"])
+    base = max(0.0, base_v["gemas"]) if base_v else 0.0
     f_dados = {"shiny": r["shiny"], "potencia": r["potencia"]}
     pedras_cache: dict = {}
     saida_finais, avisos = [], []
@@ -294,7 +316,8 @@ def precificar(con, comps, r: dict, ficha: dict, valor_hora: float | None = None
                                               nota_agora, r["potencia"])
     if not cb:
         avisos.append("sem câmbio coins/gemas: os valores em coins não entram na comparação")
-    return {"agora": agora, "valor_agora": round(base, 1), "valor_agora_moeda": base_v and base_v["moeda"],
+    return {"agora": agora, "valor_agora": round(base, 1), "min_gemas_h": MIN_GEMAS_H,
+            "horizonte": horizonte(r.get("nivel_treinador")), "valor_agora_moeda": base_v and base_v["moeda"],
             "coins_por_gema": cb, "valor_hora": valor_hora, "finais": saida_finais, "subir": subir,
             "diaria_coins": pokemon.DIARIA_ANUNCIO_COINS, "avisos": avisos}
 

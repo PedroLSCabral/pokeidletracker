@@ -1626,16 +1626,20 @@ function htmlPrecosVenda(p, pr) {
   }
   return h + `<p class="aviso">A diária do anúncio é de ${fmtNum(pr.diaria_coins, 'coins')} coins por dia${pr.coins_por_gema ? ` (~${nf(1).format(pr.diaria_coins / pr.coins_por_gema)} gema)` : ''}; "em gemas" já desconta 1 diária.</p>`;
 }
+const txtHorizonte = (pr) => (ultimaEvolucao && ultimaEvolucao.nivel_treinador ? ' (o seu treinador + 5, o teto do jogo para lutar)' : ' (sem nível de treinador)');
 function htmlVale(v, pr, f, nome) {
   const base = pr.valor_agora;
   const hora = pr.valor_hora;
   const pedras = f && v.pedras.length
-    ? `Pedras: ${v.pedras.map((x) => `${esc(x.nome)} ${x.gemas == null ? '<span class="margem-neg">sem preço</span>' : `(~${x.moeda === 'coins' ? fmtNum(x.preco, 'coins') + ' coins = ' : ''}${nf(x.gemas < 1 ? 2 : 1).format(x.gemas)} gema)`}`).join(', ')}.` : '';
+    ? `Pedras: ${v.pedras.map((x) => `${esc(x.nome)} ${x.gemas == null ? '<span class="margem-neg">sem preço no mercado, fora da conta</span>' : `(~${x.moeda === 'coins' ? fmtNum(x.preco, 'coins') + ' coins = ' : ''}${nf(x.gemas < 1 ? 2 : 1).format(x.gemas)} gema)`}`).join(', ')}.` : '';
   let titulo;
   const m = v.melhor;
   if (v.sem_preco) titulo = `<span class="margem-neg">Sem preço de mercado para ${esc(nome)} com essa nota: não dá para dizer.</span>`;
   else if (!v.vale) {
-    titulo = `<span class="margem-neg">Não vale a pena${f ? ' evoluir' : ' subir'} para vender.</span> ${base > 0 ? `Vender agora rende ~${nf(1).format(base)} gemas líquidas` : 'Agora ele não vai ao mercado'}${hora != null ? `, e nenhum ponto paga ${nf(1).format(hora)} gemas por hora caçada` : ', e nenhum ponto rende mais que isso'}.`;
+    const porque = hora != null ? `nenhum ponto paga ${nf(1).format(hora)} gemas por hora caçada`
+      : m && m.gemas_h != null ? `o melhor ponto (Nv ${nf(0).format(m.nivel)}, em ${fmtHoras(m.horas)}) rende só ${nf(2).format(m.gemas_h)} gema por hora, menos de ${nf(1).format(pr.min_gemas_h)}`
+        : `até o Nv ${nf(0).format(pr.horizonte)} nenhum ponto rende mais que isso`;
+    titulo = `<span class="margem-neg">Não vale a pena${f ? ' evoluir' : ' subir'} para vender.</span> ${base > 0 ? `Vender agora rende ~${nf(1).format(base)} gemas líquidas` : 'Agora ele não vai ao mercado'}, e ${porque}.`;
   } else {
     const ate = f && m.nivel === f.caminho[f.caminho.length - 1].nivel ? `evolua (Nv ${nf(0).format(m.nivel)}) e venda` : `${f ? 'evolua e suba' : 'suba'} até o <b>Nv ${nf(0).format(m.nivel)}</b> e venda`;
     titulo = `<span class="margem-pos">Vale: ${ate}.</span> Em ${fmtHoras(m.horas)} caçando, ele passa a valer ~${nf(1).format(m.valor)} gemas líquidas, <b>+${nf(1).format(m.ganho)}</b> sobre vender agora${f ? ' (já sem as pedras)' : ''}: <b>${m.gemas_h == null ? '—' : nf(2).format(m.gemas_h)} gemas por hora</b>${hora != null ? `, ${nf(1).format(m.lucro_tempo)} depois de pagar a sua hora` : ''}.`;
@@ -1645,7 +1649,7 @@ function htmlVale(v, pr, f, nome) {
   const naEvol = f && v.na_evolucao && v.na_evolucao.pode_vender && (!m || m.nivel !== f.caminho[f.caminho.length - 1].nivel)
     ? `<details class="pke-trilha"><summary>Preço de venda logo ao evoluir (Nv ${nf(0).format(f.caminho[f.caminho.length - 1].nivel)})</summary>${htmlPrecosVenda(v.na_evolucao, pr)}</details>` : '';
   return `<p style="margin:4px 0">${titulo}</p>
-    <p class="aviso" style="margin:2px 0 6px">Base: vender agora ~${nf(1).format(base)} gemas líquidas pelo preço justo. ${pedras} O preço de mercado sobe em degraus (faixas de nível &lt;100, 100, 101-200, 201-500, 501-1000, 1000+): o melhor ponto costuma ser a entrada de uma faixa.</p>
+    <p class="aviso" style="margin:2px 0 6px">Base: vender agora ~${nf(1).format(base)} gemas líquidas pelo preço normal. ${pedras} Procura até o Nv ${nf(0).format(pr.horizonte)}${txtHorizonte(pr)}. O preço de mercado sobe em degraus (faixas de nível &lt;100, 100, 101-200, 201-500, 501-1000, 1000+): o melhor ponto costuma ser a entrada de uma faixa.</p>
     ${noMelhor}${naEvol}
     <details class="pke-trilha"${v.vale ? '' : ' open'}><summary>Valor em cada nível</summary>
       <div class="tabela-wrap" style="max-height:360px"><table class="tabela">
