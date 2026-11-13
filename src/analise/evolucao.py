@@ -218,9 +218,12 @@ def destinos(c: dict, especies: dict, t: dict) -> list[list]:
     return saida
 
 
-def tem_arte(c: dict, outland: set) -> bool:
-    """temSpriteJogo: sem looktype não aparece; uma forma (1000-12999) precisa do looktype 60000 + id."""
+def tem_arte(c: dict, outland: set, especies: dict | None = None) -> bool:
+    """temSpriteJogo: sem looktype não aparece; uma forma (1000-12999) precisa do looktype 60000 + id. As
+    variantes Orre (13xxx) sem looktype herdam o da espécie base, como no cliente (herdarLooktypeOrre)."""
     lt, pid = c.get("looktype") or 1, int(c["pokeId"])
+    if lt <= 1 and pid >= 13_000 and especies:
+        lt = (especies.get(pid % 1000) or {}).get("looktype") or 1
     if lt <= 1:
         return False
     return not (pid not in outland and 1000 <= pid < 13000 and lt != 60_000 + pid)
@@ -309,6 +312,15 @@ def _pontos(ini: int, fim: int, fixos) -> list[int]:
     return sorted(pts)
 
 
+def _pedra(m: caca.Motor, tipo: str | None, shiny: bool) -> str | None:
+    """A pedra de evolução do tipo; Pokémon shiny usa a Shiny Stone do tipo (ex.: "Rock Shiny Stone")."""
+    if not tipo:
+        return None
+    if shiny:
+        return f"{tipo.capitalize()} Shiny Stone"
+    return m.pedras.get(tipo) or f"pedra {tipo}"
+
+
 def _hunt(r: dict | None) -> dict | None:
     if not r:
         return None
@@ -364,6 +376,8 @@ def analisar(ficha: dict, nivel_treinador: int | None = None, nivel_alvo: int | 
                 "hunt": _hunt(r), "preco": preco(e["n"], nivel, nota)}
 
     nota0 = nota_pokemon(ivs, q, pot, shiny, tuple(esp0["b"]), arv.ancestrais(sid))
+    if esp0.get("mega") and ficha.get("nota") is not None:
+        nota0 = ficha["nota"]   # o catálogo não tem as bases próprias das megas: vale a nota do jogo
     atual = forma(sid, L0, ficha.get("nota") or nota0) | {
         "nota": nota0, "faixa": faixa_da_nota(nota0), "nota_jogo": ficha.get("nota"), "poder_jogo": ficha.get("poder")}
 
@@ -377,7 +391,7 @@ def analisar(ficha: dict, nivel_treinador: int | None = None, nivel_alvo: int | 
         for para, nv, tipo in caminho:
             nivel = max(nivel, nv)
             etapas.append({"id": para, "nome": m.esp[para]["n"], "nivel": nivel, "nivel_jogo": nv,
-                           "pedra": "Shiny Stone" if shiny else (m.pedras.get(tipo) or (f"pedra {tipo}" if tipo else None))})
+                           "pedra": _pedra(m, tipo, shiny)})
         nivel_final = etapas[-1]["nivel"]
         alvo = max(nivel_final, int(nivel_alvo) if nivel_alvo else nivel_final)
         trilha, horas, sem_hunt = [], 0.0, False

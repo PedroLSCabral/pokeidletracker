@@ -420,7 +420,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   - a trilha tem `PONTOS_TRILHA` (28) pontos em escala de log do nível de agora até o alvo, mais os níveis das evoluções. Em cada ponto, `Motor.xp_h` com a forma daquele nível; o tempo entre dois pontos é o XP que falta ÷ a média harmônica do XP/h nas duas pontas (com a forma do ponto de partida). Supõe evoluir assim que chega ao nível e que o Pokémon leva o XP inteiro do abate;
   - devolve `atual` e `finais` (um por evolução final, a melhor nota primeiro), com `caminho`, `nota`, `mercado_ok`, `na_evolucao`, `no_alvo`, `horas_ate_evoluir`, `horas_ate_alvo`, `trilha` e o preço justo (`Comparaveis.preco_justo` da forma final, no nível e na nota projetada);
   - avisa quando o Pokémon tem refino (a nota projetada usa as bases sem ele) e quando a trilha passa do nível do treinador + 5 (o limite do jogo para lutar).
-- **Medido:** Larvitar → Tyranitar com 28 pontos leva ~0,2 s; Eevee (8 finais) até o Nv 500, ~1 s.
+- **Medido (11/2026):** a nota calculada bate com a do jogo (|dif| < 0,002) em 26.414 de 26.671 anúncios sem refino, todos os que não são mega; o ⚔ também. As megas divergem porque o catálogo guarda nelas as bases da forma base (as próprias estão em `shared/megas.mjs`, que não é baixado), então para uma mega a análise usa a nota do anúncio. Larvitar → Tyranitar com 28 pontos leva ~0,2 s; Eevee (8 finais) até o Nv 500, ~1 s.
 
 ### `analise/pvp.py` (aba PvP)
 - **Tipos:** `TABELA` é a tabela de tipos da série, a mesma de `shared/tipo-efetividade.mjs` do jogo. `mult(atq, defesa)` dá o multiplicador e `melhor_ataque(atacante, defensor)` o melhor golpe de mesmo tipo.

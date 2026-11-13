@@ -179,12 +179,12 @@
           <label title="Qualidade da ficha, de 0,8 a 1,8">Qualidade <input id="pke-qual" class="campo" type="number" min="0.8" max="1.8" step="0.001" placeholder="1,000"></label>
           <label>Potência <select id="pke-pot" class="campo"><option value="1">1</option><option>2</option><option>3</option><option>4</option><option value="5">5 (P5)</option></select></label>
           <label class="check"><input type="checkbox" id="pke-shiny"> shiny</label>
-          <label>IV HP <input class="campo" data-pkeiv="hp" type="number" min="1" max="32" step="1" placeholder="1-32"></label>
-          <label>IV ATK <input class="campo" data-pkeiv="atk" type="number" min="1" max="32" step="1" placeholder="1-32"></label>
-          <label>IV DEF <input class="campo" data-pkeiv="def" type="number" min="1" max="32" step="1" placeholder="1-32"></label>
-          <label>IV SP.ATK <input class="campo" data-pkeiv="spAtk" type="number" min="1" max="32" step="1" placeholder="1-32"></label>
-          <label>IV SP.DEF <input class="campo" data-pkeiv="spDef" type="number" min="1" max="32" step="1" placeholder="1-32"></label>
-          <label>IV SPD <input class="campo" data-pkeiv="speed" type="number" min="1" max="32" step="1" placeholder="1-32"></label>
+          <label>IV HP <input class="campo" data-pkeiv="hp" type="number" min="1" max="32" step="1" required placeholder="1-32"></label>
+          <label>IV ATK <input class="campo" data-pkeiv="atk" type="number" min="1" max="32" step="1" required placeholder="1-32"></label>
+          <label>IV DEF <input class="campo" data-pkeiv="def" type="number" min="1" max="32" step="1" required placeholder="1-32"></label>
+          <label>IV SP.ATK <input class="campo" data-pkeiv="spAtk" type="number" min="1" max="32" step="1" required placeholder="1-32"></label>
+          <label>IV SP.DEF <input class="campo" data-pkeiv="spDef" type="number" min="1" max="32" step="1" required placeholder="1-32"></label>
+          <label>IV SPD <input class="campo" data-pkeiv="speed" type="number" min="1" max="32" step="1" required placeholder="1-32"></label>
           <label title="Só entram as hunts que o seu treinador já libera">Seu nível de treinador <input id="pke-treinador" class="campo" type="number" min="1" placeholder="sem limite"></label>
           <label title="Até que nível simular depois da evolução final (vazio = o nível em que ela acontece)">Simular até o nível <input id="pke-alvo" class="campo" type="number" min="1" placeholder="o da evolução"></label>
           <button class="btn-primario" type="submit">Analisar</button>

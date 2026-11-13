@@ -304,7 +304,7 @@ def baixar_catalogo() -> int:
                    a.get("cooldownMs") or 0, a.get("learnLevel") or 1] for a in c.get("attacks") or []],
         }
         if tabelas:
-            if not evolucao.tem_arte(c, outland):
+            if not evolucao.tem_arte(c, outland, especies):
                 saida[pid]["a"] = 0
             ds = evolucao.destinos(c, especies, tabelas)
             if ds:
