@@ -1531,8 +1531,17 @@ function percentilQualidade(q) {   // percentilQualidade de shared/nota-pokemon.
 }
 const POTENCIA_TXT = { 1: 'P1 (sem bônus)', 2: 'P2 (×1.05)', 3: 'P3 (×1.1)', 4: 'P4 (×1.25)', 5: 'P5 (×2)' };
 const num2 = (v) => String(Math.round(v * 100) / 100);
-function fichaSimulada(d, f) {
-  const x = f.no_alvo || f.na_evolucao;
+// A forma final em qualquer nível a partir do da evolução: stat = (base + 2·IV) × nível/100 × fator (o mesmo
+// `_fatores` do servidor) e ⚔ = nível × 10 × score, como no jogo.
+function formaNoNivel(d, f, nivel) {
+  const ev = f.na_evolucao;
+  const n = Math.max(ev.nivel, Math.round(nivel) || ev.nivel);
+  const stats = {};
+  for (const k of Object.keys(NOMES_STAT)) stats[k] = Math.round((ev.bases[k] + 2 * d.ivs[k]) * n / 100 * d.fatores[k]);
+  return { ...ev, nivel: n, stats, poder: Math.max(1, Math.round(n * 10 * ev.score)) };
+}
+function fichaSimulada(d, f, nivel) {
+  const x = formaNoNivel(d, f, nivel);
   const ivs = Object.keys(NOMES_STAT).map((k) => d.ivs[k]);
   const bases = Object.keys(NOMES_STAT).map((k) => x.bases[k]);
   const stats = Object.keys(NOMES_STAT).map((k) => x.stats[k]);
@@ -1614,7 +1623,8 @@ function desenharEvolucao(d) {
     const ganho = ev.xp_h && a.xp_h ? ev.xp_h / a.xp_h : null;
     const caminho = [`${esc(a.nome)}`].concat(f.caminho.map((x) => `${esc(x.nome)} <span class="aviso">(Nv ${nf(0).format(x.nivel_jogo)}${x.pedra ? ', ' + esc(x.pedra) : ''})</span>`)).join(' → ');
     h += `<div class="caixa pke-final">
-      <h4 class="pke-tit">${esc(f.final.nome)} ${tagsTipo(f.final.tipos)} <button type="button" class="chip pke-btn" data-copiar-ficha="${i}" title="Copia a ficha de ${esc(f.final.nome)} no Nv ${nf(0).format((alvo || ev).nivel)} no mesmo modelo que o jogo copia">Copiar ficha simulada</button></h4>
+      <h4 class="pke-tit">${esc(f.final.nome)} ${tagsTipo(f.final.tipos)} <span class="pke-copiar"><button type="button" class="chip pke-btn" data-copiar-ficha="${i}" title="Copia a ficha de ${esc(f.final.nome)} no nível ao lado, no mesmo modelo que o jogo copia">Copiar ficha simulada</button>
+        no Nv <input type="number" class="campo pke-nivel-ficha" data-nivel-ficha="${i}" min="${ev.nivel}" step="1" value="${(alvo || ev).nivel}" title="Qualquer nível a partir do ${nf(0).format(ev.nivel)} (o da evolução)"></span></h4>
       <p class="explica" style="margin:4px 0 8px">${caminho}</p>
       <div class="tiles">
         <div class="tile"><div class="rot">Nota na evolução final</div><div class="val">${nf(3).format(f.nota)}</div><div class="det">${esc(f.faixa)} · ${f.mercado_ok ? '<span class="margem-pos">pode ir ao mercado</span>' : '<span class="margem-neg">abaixo de 3,5: não vai ao mercado</span>'}</div></div>
@@ -1643,12 +1653,17 @@ function ligarEvolucao() {
   $('#pke-corpo').addEventListener('click', async (e) => {
     const b = e.target.closest('[data-copiar-ficha]');
     if (!b || !ultimaEvolucao) return;
-    const ok = await copiarTexto(fichaSimulada(ultimaEvolucao, ultimaEvolucao.finais[+b.dataset.copiarFicha]));
+    const i = +b.dataset.copiarFicha;
+    const nivel = +$(`[data-nivel-ficha="${i}"]`).value;
+    const ok = await copiarTexto(fichaSimulada(ultimaEvolucao, ultimaEvolucao.finais[i], nivel));
     b.textContent = ok ? 'Copiada!' : 'Não deu para copiar';
     setTimeout(() => { b.textContent = 'Copiar ficha simulada'; }, 2000);
   });
   // Mexeu no formulário: os stats da ficha colada não valem mais (a conta volta para a fórmula).
-  $('#pke-form').addEventListener('input', () => { fichaColada = null; });
+  // Treinador e "simular até" não mudam a ficha.
+  $('#pke-form').addEventListener('input', (e) => {
+    if (!['pke-treinador', 'pke-alvo'].includes(e.target.id)) fichaColada = null;
+  });
   // "Evoluir" num anúncio da busca: abre a análise com a ficha dele.
   $('#pkb-tabela').addEventListener('click', (e) => {
     const b = e.target.closest('[data-evoluir]');

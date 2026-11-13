@@ -373,7 +373,8 @@ def analisar(ficha: dict, nivel_treinador: int | None = None, nivel_alvo: int | 
         r = xp(pid, nivel)
         return {"id": pid, "nome": e["n"], "tipos": e["t"], "nivel": nivel, "bases": dict(zip(STATS, e["b"])),
                 "stats": _stats(e["b"], ivs, fat, nivel),
-                "poder": poder(nivel, ivs, q, pot, shiny, e["b"]), "xp_h": round(r["xp_h"]) if r else None,
+                "poder": poder(nivel, ivs, q, pot, shiny, e["b"]), "score": score_forca(ivs, q, pot, shiny, e["b"]),
+                "xp_h": round(r["xp_h"]) if r else None,
                 "hunt": _hunt(r), "preco": preco(e["n"], nivel, nota)}
 
     nota0 = nota_pokemon(ivs, q, pot, shiny, tuple(esp0["b"]), arv.ancestrais(sid))
@@ -437,6 +438,7 @@ def analisar(ficha: dict, nivel_treinador: int | None = None, nivel_alvo: int | 
             avisos.append(f"o jogo só deixa o Pokémon lutar até o nível do treinador + {FOLGA_NIVEL_POKEMON} ({teto}): "
                           "a trilha supõe que o treinador sobe junto")
     return {"atual": atual, "finais": finais, "nivel_treinador": treinador, "avisos": avisos,
+            "fatores": dict(zip(STATS, fat)),   # para a página montar a ficha simulada em qualquer nível
             "ivs": dict(zip(STATS, ivs)), "qualidade": q, "potencia": pot, "shiny": shiny,
             "ja_e_final": not finais}
 
