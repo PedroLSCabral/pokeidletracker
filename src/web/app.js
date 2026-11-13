@@ -1281,6 +1281,7 @@ function mostrarSubPk(sub) {
   if (sub === 'padroes') carregarPadroesPk();
   if (sub === 'vendas') carregarPokemon();
   if (sub === 'pvp' && !estado.pvp && $('#pvp-nick').value.trim()) analisarPvp();
+  if (sub === 'evolucao') carregarEspeciesPk();
 }
 
 const tagsTipo = (tipos) => (tipos || []).map((t) => `<span class="tipo-tag">${esc(TIPOS_PK[t] || t)}</span>`).join('');
@@ -1330,7 +1331,7 @@ async function buscarPk(e) {
       <th class="num">Lucro revendendo</th><th>Vendedor</th></tr>
     ${d.itens.map((x, i) => `<tr title="${esc(tituloIvs(x))}${x.faixa ? ` | vendas parecidas entre ${fmtNum(x.faixa[0], m)} e ${fmtNum(x.faixa[1], m)}` : ''}">
       <td>${i + 1}</td>
-      <td style="white-space:normal">${esc(x.especie)} ${x.shiny ? '<span class="tag shiny">shiny</span>' : ''}${x.tm ? ' <span class="tag">TM</span>' : ''}${x.nota_pvp != null ? ` <span class="tag" title="Nota de PvP da espécie (0 a 1): meta do high elo e as suas ameaças">PvP ${nf(2).format(x.nota_pvp)}</span>` : ''}<br>${tagsTipo(x.tipos)}</td>
+      <td style="white-space:normal">${esc(x.especie)} ${x.shiny ? '<span class="tag shiny">shiny</span>' : ''}${x.tm ? ' <span class="tag">TM</span>' : ''}${x.nota_pvp != null ? ` <span class="tag" title="Nota de PvP da espécie (0 a 1): meta do high elo e as suas ameaças">PvP ${nf(2).format(x.nota_pvp)}</span>` : ''}<br>${tagsTipo(x.tipos)} <button type="button" class="chip pke-btn" data-evoluir="${x.id}" title="Simular este Pokémon até a evolução final: nota, XP/h, tempo e preço">Evoluir</button></td>
       <td class="num">${nf(0).format(x.nivel ?? 0)}</td><td class="num">${x.potencia ?? '—'}</td><td class="num" style="white-space:nowrap">${x.iv ?? '—'}${x.ivs_nota ? `<br><span class="aviso">${htmlIvsChave(x.ivs_nota)}</span>` : ''}</td>
       <td class="num">${x.qualidade != null ? nf(3).format(x.qualidade) : '—'}</td><td class="num">${x.nota != null ? nf(3).format(x.nota) : '—'}</td>
       <td class="num">${nf(0).format(x.poder ?? 0)}</td>
@@ -1397,6 +1398,129 @@ async function carregarPadroesPk() {
     + d.taxa_exemplos.map((x) => `<tr><td class="num">${htmlPreco(x.preco, moeda)}</td><td class="num">${fmtNum(x.taxa, moeda)}</td><td class="num">${nf(1).format(x.taxa / x.preco * 100)}%</td><td class="num">${fmtNum(x.preco - x.taxa, moeda)}</td></tr>`).join('');
 }
 
+// ------ análise de um Pokémon com a evolução final (analise/evolucao.py)
+const NOMES_STAT = { hp: 'HP', atk: 'ATK', def: 'DEF', spAtk: 'SP.ATK', spDef: 'SP.DEF', speed: 'SPD' };
+let especiesPk = null;
+async function carregarEspeciesPk() {
+  if (especiesPk) return;
+  try {
+    especiesPk = (await api('/api/pk/especies')).especies;
+  } catch (err) {
+    $('#pke-sub').textContent = err.message;
+    return;
+  }
+  // As que evoluem primeiro: são as que interessam aqui.
+  const ordem = [...especiesPk].sort((a, b) => (b.evolui - a.evolui) || a.nome.localeCompare(b.nome));
+  $('#pke-lista').innerHTML = ordem.map((e) => `<option value="${esc(e.nome)}">${e.evolui ? 'evolui' : 'última forma'}</option>`).join('');
+}
+function fmtHoras(h) {
+  if (h == null) return '—';
+  if (h <= 0) return 'agora';
+  if (h < 1) return `${nf(0).format(Math.max(1, h * 60))} min`;
+  if (h < 48) return `${nf(1).format(h)} h`;
+  return `${nf(h < 240 ? 1 : 0).format(h / 24)} dias`;
+}
+function htmlPrecoPk(p) {
+  if (!p) return '<span class="aviso">sem vendas para estimar</span>';
+  return Object.entries(p).map(([m, x]) => `<span title="${esc(`${x.metodo}, confiança ${x.confianca}, ${x.comps} vendas · faixa ${fmtNum(x.faixa[0], m)} a ${fmtNum(x.faixa[1], m)}`)}">${htmlPreco(x.justo, m)} <span class="conf ${x.confianca}">${x.confianca}</span></span>`).join('<br>');
+}
+const tituloHunt = (h) => (h ? `${h.nome} (Nv ${nf(0).format(h.nivel)}) · ${nf(0).format(h.abates_h)} abates/h · ${nf(1).format(h.luta_s)} s de luta por abate${h.morre ? ' · morre às vezes' : ''}` : 'não mata em nenhuma hunt liberada');
+const htmlNota = (n, faixa) => `N= <b>${nf(3).format(n)}</b> <span class="aviso">${esc(faixa)}</span>`;
+function htmlStats(...formas) {
+  return `<table class="tabela pke-stats"><tr><th></th>${Object.values(NOMES_STAT).map((n) => `<th class="num">${n}</th>`).join('')}</tr>
+    ${formas.filter(Boolean).map((f) => `<tr><td>${esc(f.nome)} Nv ${nf(0).format(f.nivel)}</td>${Object.keys(NOMES_STAT).map((k) => `<td class="num">${nf(0).format(f.stats[k])}</td>`).join('')}</tr>`).join('')}</table>`;
+}
+async function analisarEvolucao(e, anuncio = null) {
+  e?.preventDefault();
+  const p = { treinador: $('#pke-treinador').value, alvo: $('#pke-alvo').value };
+  if (anuncio) p.anuncio = anuncio;
+  else {
+    if (!$('#pke-form').reportValidity()) return;
+    Object.assign(p, { especie: $('#pke-esp').value.trim(), nivel: $('#pke-nivel').value, qualidade: $('#pke-qual').value,
+      potencia: $('#pke-pot').value, shiny: $('#pke-shiny').checked ? 1 : '' });
+    $$('[data-pkeiv]').forEach((i) => { p[i.dataset.pkeiv] = i.value; });
+  }
+  gravarLocal('pk_treinador', $('#pke-treinador').value);
+  const botao = $('#pke-form button[type=submit]');
+  botao.disabled = true;
+  $('#pke-corpo').innerHTML = '<div class="vazio">simulando nível a nível…</div>';
+  let d;
+  try {
+    d = await api('/api/pk/evolucao', p);
+  } catch (err) {
+    $('#pke-corpo').innerHTML = `<div class="vazio">Não deu: ${esc(err.message)}</div>`;
+    return;
+  } finally {
+    botao.disabled = false;
+  }
+  if (anuncio) {   // a ficha do anúncio vai para o formulário, para poder mexer e simular de novo
+    $('#pke-esp').value = d.atual.nome;
+    $('#pke-nivel').value = d.atual.nivel;
+    $('#pke-qual').value = d.qualidade;
+    $('#pke-pot').value = String(d.potencia);
+    $('#pke-shiny').checked = d.shiny;
+    $$('[data-pkeiv]').forEach((i) => { i.value = d.ivs[i.dataset.pkeiv] ?? ''; });
+  }
+  desenharEvolucao(d);
+}
+function desenharEvolucao(d) {
+  const a = d.atual;
+  const an = d.anuncio;
+  $('#pke-sub').textContent = an ? `anúncio ${an.id}${an.ativo ? '' : ' (já saiu da loja)'}` : '';
+  const notaJogo = a.nota_jogo != null && Math.abs(a.nota_jogo - a.nota) >= 0.01
+    ? ` <span class="aviso" title="A nota que o jogo mandou no anúncio é diferente da calculada aqui (refino ou mudança na fórmula do jogo)">(jogo: ${nf(3).format(a.nota_jogo)})</span>` : '';
+  let h = `${d.avisos.map((x) => `<p class="aviso">⚠ ${esc(x)}</p>`).join('')}
+    <div class="tiles">
+      <div class="tile"><div class="rot">Agora</div><div class="val">${esc(a.nome)}${d.shiny ? ' <span class="tag shiny">shiny</span>' : ''}</div><div class="det">Nv ${nf(0).format(a.nivel)} · P${d.potencia} · Q ${nf(3).format(d.qualidade)} · ${tagsTipo(a.tipos)}</div></div>
+      <div class="tile"><div class="rot">Nota</div><div class="val">${nf(3).format(a.nota)}</div><div class="det">${esc(a.faixa)}${notaJogo}</div></div>
+      <div class="tile"><div class="rot">Poder</div><div class="val">${nf(0).format(a.poder_jogo ?? a.poder)}</div><div class="det">⚔ do jogo</div></div>
+      <div class="tile" title="${esc(tituloHunt(a.hunt))}"><div class="rot">XP/h agora</div><div class="val">${a.xp_h != null ? curto(a.xp_h) : '—'}</div><div class="det">${a.hunt ? esc(a.hunt.nome) : 'não mata em nenhuma hunt'}${d.nivel_treinador ? '' : ' · sem limite de treinador'}</div></div>
+      <div class="tile"><div class="rot">Preço justo agora</div><div class="val" style="font-size:15px">${htmlPrecoPk(a.preco)}</div>${an ? `<div class="det">anunciado por ${fmtNum(an.preco, an.moeda)} ${an.moeda === 'gems' ? 'gemas' : 'coins'}</div>` : ''}</div>
+    </div>`;
+  if (d.ja_e_final) {
+    h += '<div class="vazio">Este já é a última forma: não há evolução para simular.</div>';
+  }
+  for (const f of d.finais) {
+    const ev = f.na_evolucao;
+    const alvo = f.no_alvo;
+    const ganho = ev.xp_h && a.xp_h ? ev.xp_h / a.xp_h : null;
+    const caminho = [`${esc(a.nome)}`].concat(f.caminho.map((x) => `${esc(x.nome)} <span class="aviso">(Nv ${nf(0).format(x.nivel_jogo)}${x.pedra ? ', ' + esc(x.pedra) : ''})</span>`)).join(' → ');
+    h += `<div class="caixa pke-final">
+      <h4 class="pke-tit">${esc(f.final.nome)} ${tagsTipo(f.final.tipos)}</h4>
+      <p class="explica" style="margin:4px 0 8px">${caminho}</p>
+      <div class="tiles">
+        <div class="tile"><div class="rot">Nota na evolução final</div><div class="val">${nf(3).format(f.nota)}</div><div class="det">${esc(f.faixa)} · ${f.mercado_ok ? '<span class="margem-pos">pode ir ao mercado</span>' : '<span class="margem-neg">abaixo de 3,5: não vai ao mercado</span>'}</div></div>
+        <div class="tile"><div class="rot">Tempo até evoluir</div><div class="val">${fmtHoras(f.horas_ate_evoluir)}</div><div class="det">até o Nv ${nf(0).format(ev.nivel)}, caçando sem parar</div></div>
+        <div class="tile" title="${esc(tituloHunt(ev.hunt))}"><div class="rot">XP/h ao evoluir</div><div class="val">${ev.xp_h != null ? curto(ev.xp_h) : '—'}</div><div class="det">${ev.hunt ? esc(ev.hunt.nome) : '—'}${ganho ? ` · ${nf(1).format(ganho)}× o de agora` : ''}</div></div>
+        <div class="tile"><div class="rot">Poder ao evoluir</div><div class="val">${nf(0).format(ev.poder)}</div><div class="det">⚔ no Nv ${nf(0).format(ev.nivel)}</div></div>
+        <div class="tile"><div class="rot">Preço justo ao evoluir</div><div class="val" style="font-size:15px">${htmlPrecoPk(ev.preco)}</div><div class="det">Nv ${nf(0).format(ev.nivel)}, N= ${nf(2).format(f.nota)}</div></div>
+        ${alvo ? `<div class="tile" title="${esc(tituloHunt(alvo.hunt))}"><div class="rot">No Nv ${nf(0).format(alvo.nivel)}</div><div class="val">${alvo.xp_h != null ? curto(alvo.xp_h) + ' XP/h' : '—'}</div><div class="det">${fmtHoras(f.horas_ate_alvo)} até lá · ⚔ ${nf(0).format(alvo.poder)}</div></div>
+          <div class="tile"><div class="rot">Preço justo no Nv ${nf(0).format(alvo.nivel)}</div><div class="val" style="font-size:15px">${htmlPrecoPk(alvo.preco)}</div></div>` : ''}
+      </div>
+      ${htmlStats(a, ev, alvo)}
+      <details class="pke-trilha"><summary>Trilha nível a nível</summary>
+        <div class="tabela-wrap" style="max-height:420px"><table class="tabela">
+          <tr><th class="num">Nv</th><th>Forma</th><th class="num">XP/h</th><th>Melhor hunt</th><th class="num">Tempo acumulado</th></tr>
+          ${f.trilha.map((p) => `<tr><td class="num">${nf(0).format(p.nivel)}</td><td>${esc(p.nome)}</td><td class="num">${p.xp_h != null ? curto(p.xp_h) : '—'}</td><td>${esc(p.hunt || '—')}</td><td class="num">${fmtHoras(p.horas)}</td></tr>`).join('')}
+        </table></div>
+      </details>
+    </div>`;
+  }
+  $('#pke-corpo').innerHTML = h;
+}
+function ligarEvolucao() {
+  $('#pke-treinador').value = lerLocal('pk_treinador');
+  $('#pke-form').addEventListener('submit', (e) => analisarEvolucao(e));
+  // "Evoluir" num anúncio da busca: abre a análise com a ficha dele.
+  $('#pkb-tabela').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-evoluir]');
+    if (!b) return;
+    if ($('#pkb-treinador').value) $('#pke-treinador').value = $('#pkb-treinador').value;
+    mostrarSubPk('evolucao');
+    analisarEvolucao(null, b.dataset.evoluir);
+  });
+}
+
 function ligarPokemon() {
   $('#pkb-obj').innerHTML = Object.entries(OBJETIVOS_PK).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
   $('#pkb-treinador').value = lerLocal('pk_treinador');
@@ -1406,6 +1530,7 @@ function ligarPokemon() {
   $('#pkb-tipo').innerHTML = '<option value="">qualquer</option>' + Object.entries(TIPOS_PK).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
   $('#pkb-form').addEventListener('submit', buscarPk);
   ligarPvp();
+  ligarEvolucao();
   $$('[data-pksub]').forEach((b) => b.addEventListener('click', () => mostrarSubPk(b.dataset.pksub)));
   $$('[data-pkdias]').forEach((b) => b.addEventListener('click', () => {
     estado.pkdias = +b.dataset.pkdias;

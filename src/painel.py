@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import caminhos  # noqa: E402
 import notificar  # noqa: E402
 from analise import pokemon as analise_pokemon  # noqa: E402
-from analise import caca, pvp, sinais, venda  # noqa: E402
+from analise import caca, evolucao, pvp, sinais, venda  # noqa: E402
 from coleta import coletor, importer  # noqa: E402
 
 HOST, PORT = "127.0.0.1", 8770
@@ -472,6 +472,29 @@ def post_testar(con, b: dict) -> dict:
     return {"ok": bool(ok) and not erros, "canais": ok, "erros": erros}
 
 
+def api_evolucao(con, q: dict) -> dict:
+    """Análise de um Pokémon só, com a evolução final: de um anúncio da loja (`anuncio`) ou da ficha digitada."""
+    num = lambda k, d=0.0: float(q[k]) if q.get(k, "").strip() else d  # noqa: E731
+    m = caca.motor()
+    if q.get("anuncio", "").strip():
+        ficha = evolucao.ficha_do_anuncio(con, int(num("anuncio")))
+    else:
+        sid = evolucao.especie_por_nome(m, q.get("especie", "")[:40])
+        if not sid:
+            raise ValueError("escolha uma espécie da lista")
+        if not 1 <= num("nivel") <= 1_000_000:
+            raise ValueError("informe o nível do Pokémon")
+        ficha = {"species_id": sid, "nivel": int(num("nivel")), "qualidade": num("qualidade", 1.0),
+                 "potencia": int(num("potencia", 1)), "shiny": q.get("shiny") == "1",
+                 "ivs": {k: int(num(k, 1)) for k in evolucao.STATS}}
+    alvo = int(num("alvo")) or None
+    r = evolucao.analisar(ficha, int(num("treinador")) or None, alvo, analise_pokemon.comparaveis(con), m)
+    if not m.tem_evolucoes:
+        r["avisos"].insert(0, "o catálogo do jogo ainda não tem a árvore de evolução: o robô baixa"
+                              " o catálogo de novo em até 1 dia")
+    return r | {"anuncio": ficha.get("anuncio")}
+
+
 def api_status(con) -> dict:
     st = coletor.status(con)
     st["vendas_com_ms"] = con.execute("SELECT COUNT(*) FROM trades WHERE ts_ms IS NOT NULL").fetchone()[0]
@@ -545,6 +568,10 @@ class Handler(BaseHTTPRequestHandler):
                         nivel_treinador=int(num("treinador")) or None, transferir=extra.get("transferir", 0),
                         coins_por_gema=extra.get("coins_por_gema"))
                         | {"objetivos": analise_pokemon.OBJETIVOS, "aviso_pvp": extra.get("aviso_pvp")})
+                if url.path == "/api/pk/especies":
+                    return self._json({"especies": evolucao.especies()})
+                if url.path == "/api/pk/evolucao":
+                    return self._json(api_evolucao(con, q))
                 if url.path == "/api/pvp":
                     orc = float(q["orcamento"]) if q.get("orcamento", "").strip() else None
                     return self._json(pvp.analisar(con, q.get("nick", "")[:20], q.get("faixa", "")[:12], orc,
@@ -555,7 +582,7 @@ class Handler(BaseHTTPRequestHandler):
                 if url.path == "/api/alertas/novos":
                     return self._json(api_alertas_novos(con, int(q.get("desde", -1))))
                 return self._json({"erro": "rota desconhecida"}, 404)
-            except pvp.ErroPvP as e:
+            except (pvp.ErroPvP, ValueError, caca.SemDados) as e:
                 return self._json({"erro": str(e)}, 400)
             except Exception as e:
                 return self._json({"erro": repr(e)}, 500)

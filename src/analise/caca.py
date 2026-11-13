@@ -44,6 +44,9 @@ import caminhos
 URL_ASSETS = "https://pokeidle.io/assets/"
 CATALOGOS = ("creatures.json", "creatures-novos.json", "creatures-outland-novos.json", "creatures-formas.json")
 OVERRIDES = "creatures-audit-overrides.json"
+SPRITES_LAB = "creatures-sprites-lab.json"   # correções de looktype (decidem se a espécie tem arte jogável)
+URL_SHARED = "https://pokeidle.io/shared/"
+MODULOS_EVOLUCAO = ("evolucoes-cruzadas.mjs", "evolucoes-ramificadas.mjs", "pedras-evolucao.mjs")
 URL_PLANILHAS = "https://pokeidle.io/shared/golpes-planilhas.mjs"   # os golpes das planilhas de balanceamento
 USER_AGENT = "Mozilla/5.0 (PokeIdle Tracker)"
 
@@ -148,6 +151,12 @@ def _baixar(nome: str):
         return json.loads(r.read())
 
 
+def _baixar_texto(url: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return r.read().decode("utf-8")
+
+
 TIPOS_ELEMENTO = ("NORMAL", "FIRE", "WATER", "GRASS", "ELECTRIC", "ICE", "FIGHTING", "POISON", "GROUND", "FLYING",
                   "PSYCHIC", "BUG", "ROCK", "GHOST", "DRAGON", "DARK", "STEEL", "FAIRY")
 GOLPE_600_CD_MS = 60_000
@@ -239,10 +248,14 @@ def baixar_catalogo() -> int:
     As correções (`creatures-audit-overrides.json`) trocam stats-base e golpes, como no cliente do jogo.
     """
     especies: dict[int, dict] = {}
+    outland: set[int] = set()
     for nome in CATALOGOS:
         for c in (_baixar(nome) or {}).get("creatures") or []:
             especies.setdefault(int(c["pokeId"]), c)
+            if "outland" in nome:
+                outland.add(int(c["pokeId"]))
         time.sleep(1)
+    outland |= {pid for pid in especies if pid in FANTASMA_OUTLAND}
     for o in (_baixar(OVERRIDES) or {}).get("overrides") or []:
         c = especies.get(int(o.get("pokeId", -1)))
         if not c:
@@ -253,16 +266,35 @@ def baixar_catalogo() -> int:
         if isinstance(o.get("attacks"), list):
             c["attacks"] = o["attacks"]
     # Os golpes das planilhas de balanceamento substituem os do catálogo (aplicarGolpesDasPlanilhas do jogo).
-    req = urllib.request.Request(URL_PLANILHAS, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        ordem, fechadas, megas = ler_planilhas(r.read().decode("utf-8"))
+    ordem, fechadas, megas = ler_planilhas(_baixar_texto(URL_PLANILHAS))
     for tabela in ordem:
         for pid, golpes in tabela.items():
             if pid in especies:
                 especies[pid]["attacks"] = [dict(g) for g in golpes]
                 especies[pid]["golpesFechados"] = pid in fechadas
+    # A árvore de evolução, montada como o cliente monta (analise/evolucao.py). Se os módulos falharem, o
+    # catálogo sai do mesmo jeito, só sem as evoluções (a análise de evolução avisa).
+    from analise import evolucao
+    try:
+        time.sleep(1)
+        for p in (_baixar(SPRITES_LAB) or {}).get("patches") or []:
+            c = especies.get(int(p.get("pokeId", -1)))
+            if c and p.get("looktype"):
+                c["looktype"] = p["looktype"]
+        js = []
+        for nome in MODULOS_EVOLUCAO:
+            time.sleep(1)
+            js.append(_baixar_texto(URL_SHARED + nome))
+        tabelas = evolucao.ler_tabelas(*js)
+    except Exception as e:  # noqa: BLE001
+        print(f"catálogo: sem a árvore de evolução ({e!r})", flush=True)
+        tabelas = None
+    if tabelas:
+        evolucao.arvore_antes_dos_golpes(especies, tabelas)
     for c in especies.values():
         injetar_golpes_600(c)
+    if tabelas:
+        evolucao.arvore_depois_dos_golpes(especies, tabelas, outland)
     saida = {}
     for pid, c in especies.items():
         saida[pid] = {
@@ -271,14 +303,21 @@ def baixar_catalogo() -> int:
             "g": [[a.get("power") or 0, a.get("type"), 0 if a.get("category") == "SPECIAL" else 1,
                    a.get("cooldownMs") or 0, a.get("learnLevel") or 1] for a in c.get("attacks") or []],
         }
+        if tabelas:
+            if not evolucao.tem_arte(c, outland):
+                saida[pid]["a"] = 0
+            ds = evolucao.destinos(c, especies, tabelas)
+            if ds:
+                saida[pid]["e"] = ds
     # Megas com moveset próprio (planilha das megas): os stats-base vêm da forma base; os tipos, do anúncio.
     for pid, golpes in megas.items():
         base = saida.get(pid % 1000)
         if base and pid not in saida:
-            saida[pid] = {**base, "n": f"Mega {base['n']}", "mega": True,
+            saida[pid] = {**{k: v for k, v in base.items() if k not in ("e", "a")}, "n": f"Mega {base['n']}", "mega": True,
                           "g": [[g["power"], g["type"], 0 if g["category"] == "SPECIAL" else 1, g["cooldownMs"], 1] for g in golpes]}
     caminhos.JOGO.mkdir(parents=True, exist_ok=True)
-    _gravar_json(caminhos.CATALOGO_JOGO, {"salvo_ms": int(time.time() * 1000), "especies": saida})
+    _gravar_json(caminhos.CATALOGO_JOGO, {"salvo_ms": int(time.time() * 1000), "especies": saida,
+                                          "pedras": (tabelas or {}).get("pedras") or {}})
     return len(saida)
 
 
@@ -293,6 +332,8 @@ class Motor:
 
     def __init__(self, catalogo: dict, welcome: dict):
         self.esp = {int(k): v for k, v in catalogo["especies"].items()}
+        self.pedras = catalogo.get("pedras") or {}       # tipo → nome da pedra de evolução
+        self.tem_evolucoes = any("e" in v for v in self.esp.values())
         c = {**PADRAO_CONSTS, **(welcome.get("consts") or {})}
         self.ampl, self.mult_hp, self.mult_dano = c["ampliacaoHunt"], c["multHpSelvagem"], c["multDanoSelvagem"]
         self.tabela = welcome.get("tabelaTipos") or _tabela_padrao()

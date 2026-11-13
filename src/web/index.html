@@ -139,6 +139,7 @@
   <section id="aba-pokemon" class="aba-corpo hidden">
     <div class="pk-sub" role="tablist">
       <button class="chip ativa" data-pksub="buscar">Encontrar Pokémon</button>
+      <button class="chip" data-pksub="evolucao">Analisar um Pokémon</button>
       <button class="chip" data-pksub="pvp">PvP</button>
       <button class="chip" data-pksub="padroes">Padrões do mercado</button>
       <button class="chip" data-pksub="vendas">Vendas recentes</button>
@@ -165,6 +166,31 @@
         <p class="explica hidden" id="pkb-ponte"></p>
         <div class="tabela-wrap" style="max-height:640px"><table class="tabela" id="pkb-tabela"></table></div>
         <p class="aviso">A loja é lida a cada 3 h: um anúncio da lista pode já ter sido vendido. Para comprar, procure a espécie no Mercado do jogo e confira o vendedor e o preço. Revenda líquida = preço justo − taxa progressiva do jogo (− diária de 100 mil coins, se em coins).</p>
+      </div>
+    </div>
+
+    <div class="janela pk-painel hidden" id="pk-evolucao">
+      <div class="janela-titulo">Analisar um Pokémon até a evolução final <span class="sub" id="pke-sub"></span></div>
+      <div class="janela-corpo">
+        <form class="pk-form" id="pke-form" autocomplete="off">
+          <label class="larga">Espécie <input id="pke-esp" class="campo" list="pke-lista" required placeholder="ex.: Larvitar"></label>
+          <datalist id="pke-lista"></datalist>
+          <label>Nível <input id="pke-nivel" class="campo" type="number" min="1" step="1" required placeholder="ex.: 30"></label>
+          <label title="Qualidade da ficha, de 0,8 a 1,8">Qualidade <input id="pke-qual" class="campo" type="number" min="0.8" max="1.8" step="0.001" placeholder="1,000"></label>
+          <label>Potência <select id="pke-pot" class="campo"><option value="1">1</option><option>2</option><option>3</option><option>4</option><option value="5">5 (P5)</option></select></label>
+          <label class="check"><input type="checkbox" id="pke-shiny"> shiny</label>
+          <label>IV HP <input class="campo" data-pkeiv="hp" type="number" min="1" max="32" step="1" placeholder="1-32"></label>
+          <label>IV ATK <input class="campo" data-pkeiv="atk" type="number" min="1" max="32" step="1" placeholder="1-32"></label>
+          <label>IV DEF <input class="campo" data-pkeiv="def" type="number" min="1" max="32" step="1" placeholder="1-32"></label>
+          <label>IV SP.ATK <input class="campo" data-pkeiv="spAtk" type="number" min="1" max="32" step="1" placeholder="1-32"></label>
+          <label>IV SP.DEF <input class="campo" data-pkeiv="spDef" type="number" min="1" max="32" step="1" placeholder="1-32"></label>
+          <label>IV SPD <input class="campo" data-pkeiv="speed" type="number" min="1" max="32" step="1" placeholder="1-32"></label>
+          <label title="Só entram as hunts que o seu treinador já libera">Seu nível de treinador <input id="pke-treinador" class="campo" type="number" min="1" placeholder="sem limite"></label>
+          <label title="Até que nível simular depois da evolução final (vazio = o nível em que ela acontece)">Simular até o nível <input id="pke-alvo" class="campo" type="number" min="1" placeholder="o da evolução"></label>
+          <button class="btn-primario" type="submit">Analisar</button>
+        </form>
+        <p class="explica">Digite a ficha do seu Pokémon (ou clique em <b>Evoluir</b> num anúncio da busca). A evolução mantém nível, IVs, qualidade, potência e shiny e troca as bases da espécie. A <b>nota na evolução final</b> é a mesma conta do "Potencial na evolução final" da calculadora do jogo: a nota nunca cai, sobe pelo menos 0,1 por estágio. O XP/h e o tempo vêm do mesmo motor de caça da busca, nível a nível, supondo que você evolui assim que chega ao nível e que o Pokémon leva o XP inteiro de cada abate.</p>
+        <div id="pke-corpo"></div>
       </div>
     </div>
 

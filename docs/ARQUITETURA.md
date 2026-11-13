@@ -67,6 +67,7 @@ pokeidletracker/
 │  │  ├─ venda.py           botão "vender": moeda, preço e momento
 │  │  ├─ pokemon.py         preço justo de Pokémon, busca por orçamento, padrões do mercado
 │  │  ├─ caca.py            XP por hora de caça de um Pokémon (motor rápido) e os dados do jogo que ele usa
+│  │  ├─ evolucao.py        análise de um Pokémon só até a evolução final (nota, XP/h nível a nível, preço)
 │  │  └─ pvp.py             aba PvP (Tracker público do jogo)
 │  └─ web/                  a página do painel
 │     ├─ index.html         estrutura das abas e janelas
@@ -80,7 +81,7 @@ pokeidletracker/
 ├─ .claude/launch.json      cópia do painel na porta 8771, para testar sem mexer no que está rodando
 ├─ config.local.json        (fora do git) nick + token da conta coletora, canais de alerta
 └─ data/                    (fora do git) market.db, logs, robo_agora.json, inbox/ do importador e jogo/
-                            (catalogo.json e welcome-dados.json, para o XP/h)
+                            (catalogo.json e welcome-dados.json, para o XP/h e a evolução)
 ```
 
 **Como os imports funcionam.** Os quatro programas ficam em `src/` e põem `src/` no `sys.path`. Os
@@ -286,6 +287,8 @@ Todas as rotas GET aceitam `moeda=gems|coins` (o padrão é gems).
 | `GET /api/pokemon?busca=&shiny=&limite=` | `api_pokemon` | Vendas recentes de Pokémon |
 | `GET /api/pk/buscar?orcamento=&objetivo=&especie=&tipo=&pmin=&nivel=&nota=&shiny=&treinador=&pvp_nick=&pvp_faixa=&transferir=` | `pokemon.buscar` (+ `pvp.pesos_especies` se `objetivo` é `pvp` ou `ponte`; + `venda.cambio` se `ponte`) | Anúncios da loja ordenados pelo objetivo, com o XP/h de cada um (`xp_h`, `xp_hunt`) para o nível de treinador `treinador`. Com `objetivo=ponte`, traz `ponte` (piso, teto e, com `transferir` em gemas, a comissão, quanto recebe e o custo total) e `aviso_pvp` se o Tracker falhou |
 | `GET /api/pk/padroes?dias=` | `pokemon.padroes` | Padrões do mercado de Pokémon |
+| `GET /api/pk/evolucao?anuncio=` ou `?especie=&nivel=&qualidade=&potencia=&shiny=&hp=&atk=&def=&spAtk=&spDef=&speed=` (+ `&treinador=&alvo=`) | `api_evolucao` → `evolucao.analisar` | Um Pokémon (anúncio da loja ou ficha digitada) agora e em cada evolução final: nota projetada, stats, ⚔, XP/h, trilha nível a nível com o tempo e o preço justo |
+| `GET /api/pk/especies` | `evolucao.especies` | Espécies do catálogo (com arte, sem mega) para o formulário, com `evolui` |
 | `GET /api/pvp?nick=&faixa=&orcamento=&moeda=&forcar=` | `pvp.analisar` | Aba PvP inteira. `forcar=1` relê o seu perfil e o meta sem esperar o cache |
 | `GET /api/status` | `api_status` → `coletor.status` | Estado da coleta e as últimas linhas do log |
 | `POST /api/regras` | `post_regra` | Cria uma regra {tipo, item, moeda, valor} |
@@ -397,7 +400,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
 ### `analise/caca.py` (XP por hora de caça)
 - **O que responde:** quanto XP/h um Pokémon faz hoje, na melhor hunt liberada para um nível de treinador, sem AoE, TM, bike, casa ou bônus. A explicação completa está no topo do arquivo.
 - **Dados** (em `data/jogo/`, fora do git):
-  - `catalogo.json`, montado por `baixar_catalogo()` como o cliente do jogo monta. Junta os quatro `assets/creatures*.json` e as correções (`creatures-audit-overrides.json`). Troca os golpes pelos das planilhas de balanceamento (`shared/golpes-planilhas.mjs`, lido por expressão regular em `ler_planilhas`). Injeta os golpes de assinatura de poder 600 (`injetar_golpes_600`) e acrescenta as megas com moveset próprio;
+  - `catalogo.json`, montado por `baixar_catalogo()` como o cliente do jogo monta. Junta os quatro `assets/creatures*.json` e as correções (`creatures-audit-overrides.json`). Troca os golpes pelos das planilhas de balanceamento (`shared/golpes-planilhas.mjs`, lido por expressão regular em `ler_planilhas`). Injeta os golpes de assinatura de poder 600 (`injetar_golpes_600`) e acrescenta as megas com moveset próprio. Também monta a árvore de evolução (`e`, `a` e `pedras`, ver `analise/evolucao.py`);
   - `welcome-dados.json`, gravado pelo robô a cada login (`guardar_welcome`): as 1.043 hunts (nível e espécies com peso) e as constantes de caça.
 - **`Motor`** carrega os dois uma vez (`motor()` recarrega quando os arquivos mudam e limpa o cache). `Motor.xp_h(species_id, nivel, stats, ivs, tipos, nivel_treinador)` devolve a melhor hunt com XP/h, abates/h, segundos de luta por abate e se morre às vezes.
 - **Como fica rápido (~5 ms por Pokémon, contra segundos numa simulação completa):**
@@ -406,6 +409,18 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   3. a mini-luta (`_hunt`, 16 rolagens de HP, golpe a golpe, saltando os trechos só de Investida) só nas `CANDIDATAS` (8) melhores estimativas.
 - **Medido:** contra a busca que simula todas as hunts, mesma hunt e mesmo número em 300 de 300 casos. Contra a calculadora da comunidade, a mesma hunt em 6 de 6 casos, com XP/h entre −15% e +17%.
 - **`xp_do_anuncio(m, id, ...)`** é o atalho da busca: lê os JSON de `pk_anuncios` e guarda o resultado por (anúncio, nível do treinador).
+
+### `analise/evolucao.py` (análise de um Pokémon até a evolução final)
+- **Para que serve:** a busca avalia o Pokémon como está; aqui um Pokémon só (capturado, ou um anúncio pelo botão **Evoluir** da busca) é simulado até cada evolução final. A explicação completa está no topo do arquivo.
+- **O que a evolução muda:** só as bases da espécie (e os golpes: a última forma ganha os de poder 600). Nível, IVs, qualidade, potência, shiny e refino ficam. Precisa do nível do destino e da pedra do tipo (shiny usa Shiny Stone).
+- **Nota projetada:** `nota_pokemon` é o `notaPokemon` do jogo (`shared/nota-pokemon.mjs`) em Python, com o piso dos ancestrais (`Arvore.ancestrais`, o `anotarLinhagemDaNota` de `shared/linhagem-nota.mjs`): a nota nunca cai, sobe pelo menos 0,1 por estágio. É o mesmo número do "Potencial na evolução final" da calculadora do jogo (o servidor não o manda pronto). `poder` e `xp_total` (curva de XP do Pokémon, `⌊50/3·(L³−6L²+17L−12)⌉`) também são do cliente.
+- **A árvore:** o `creatures.json` só tem `evolvesToId`/`evolveLevel`. `baixar_catalogo` baixa também `shared/evolucoes-cruzadas.mjs`, `shared/evolucoes-ramificadas.mjs`, `shared/pedras-evolucao.mjs` e `assets/creatures-sprites-lab.json`, lê as tabelas por expressão regular (`ler_tabelas`) e monta a árvore na ordem do cliente (`arvore_antes_dos_golpes`: cadeias truncadas e 600 → 100; `arvore_depois_dos_golpes`: Outland não evolui, elos entre gerações, nível padrão das ramificações, níveis corrigidos). Cada espécie do catálogo ganha `e` = `[[destino, nível, tipo da pedra], ...]` e `a: 0` se não tem arte jogável (`tem_arte`, o `temSpriteJogo`; destino sem arte não conta como evolução final). O catálogo ganha `pedras` (tipo → nome). Se os módulos falharem, o catálogo sai sem `e` e a análise avisa.
+- **`analisar(ficha, nivel_treinador, nivel_alvo, comps, m)`:**
+  - os stats de cada forma em cada nível saem de `(base + 2·IV) × nível/100 × fator`; num anúncio o fator vem dos stats reais (já com lendário e refino), numa ficha digitada da fórmula (qualidade^exp × potência × shiny);
+  - a trilha tem `PONTOS_TRILHA` (28) pontos em escala de log do nível de agora até o alvo, mais os níveis das evoluções. Em cada ponto, `Motor.xp_h` com a forma daquele nível; o tempo entre dois pontos é o XP que falta ÷ a média harmônica do XP/h nas duas pontas (com a forma do ponto de partida). Supõe evoluir assim que chega ao nível e que o Pokémon leva o XP inteiro do abate;
+  - devolve `atual` e `finais` (um por evolução final, a melhor nota primeiro), com `caminho`, `nota`, `mercado_ok`, `na_evolucao`, `no_alvo`, `horas_ate_evoluir`, `horas_ate_alvo`, `trilha` e o preço justo (`Comparaveis.preco_justo` da forma final, no nível e na nota projetada);
+  - avisa quando o Pokémon tem refino (a nota projetada usa as bases sem ele) e quando a trilha passa do nível do treinador + 5 (o limite do jogo para lutar).
+- **Medido:** Larvitar → Tyranitar com 28 pontos leva ~0,2 s; Eevee (8 finais) até o Nv 500, ~1 s.
 
 ### `analise/pvp.py` (aba PvP)
 - **Tipos:** `TABELA` é a tabela de tipos da série, a mesma de `shared/tipo-efetividade.mjs` do jogo. `mult(atq, defesa)` dá o multiplicador e `melhor_ataque(atacante, defensor)` o melhor golpe de mesmo tipo.
@@ -429,7 +444,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
 
 - **`index.html`:** o cabeçalho tem as abas (Mercado, Sinais, Montagem, Pokémon), o seletor de moeda, o botão de som e o status.
   - Cada aba é uma `<section id="aba-…" class="aba-corpo">`.
-  - Na aba Pokémon, as sub-abas são `data-pksub` (buscar, pvp, padroes, vendas) e os painéis são `id="pk-…"`.
+  - Na aba Pokémon, as sub-abas são `data-pksub` (buscar, evolucao, pvp, padroes, vendas) e os painéis são `id="pk-…"`.
   - A janela do botão vender é `#venda-fundo`.
 - **`app.js`:** um arquivo só, dividido em seções por comentários `// ------ nome`.
   - **ícones:** `IMG`, `CATEGORIAS`, `img()`;
@@ -450,6 +465,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   - **aviso sonoro:** `checarAlertasNovos` (polling), `tocar` (WebAudio), `mostrarAviso`;
   - **PvP:** `analisarPvp(e, forcar)` (o botão `#pvp-forcar` manda `forcar=1`), `desenharPvp`, `ligarPvp`, `haQuanto`. O nick fica no `localStorage` (`pvp_nick`);
   - **pokémon:** `mostrarSubPk`, `buscarPk`, `carregarPadroesPk`, `carregarPokemon`, `ligarPokemon`;
+  - **análise com evolução:** `carregarEspeciesPk` (o `datalist` das espécies, carregado ao abrir a sub-aba), `analisarEvolucao(e, anuncio)`, `desenharEvolucao`, `ligarEvolucao`. O botão `[data-evoluir]` de cada linha da busca abre a sub-aba com a ficha do anúncio e a copia para o formulário;
   - **status e navegação:** `carregarStatus`, `mostrarAba`, `ligar()` (liga todos os eventos) e `iniciar()` (carga inicial e os timers de 1 e 5 min).
 - **Regras da página:**
   - todo texto que vem do servidor passa por `esc()` antes de entrar no HTML;
