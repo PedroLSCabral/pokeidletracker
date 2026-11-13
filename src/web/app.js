@@ -1478,7 +1478,7 @@ function colarFicha() {
 }
 async function analisarEvolucao(e, anuncio = null) {
   e?.preventDefault();
-  const p = { treinador: $('#pke-treinador').value, alvo: $('#pke-alvo').value };
+  const p = { treinador: $('#pke-treinador').value, alvo: $('#pke-alvo').value, valor_hora: $('#pke-hora').value };
   if (anuncio) p.anuncio = anuncio;
   else {
     if (!$('#pke-form').reportValidity()) return;
@@ -1492,6 +1492,7 @@ async function analisarEvolucao(e, anuncio = null) {
     }
   }
   gravarLocal('pk_treinador', $('#pke-treinador').value);
+  gravarLocal('pk_valor_hora', $('#pke-hora').value);
   const botao = $('#pke-form button[type=submit]');
   botao.disabled = true;
   $('#pke-corpo').innerHTML = '<div class="vazio">simulando nível a nível…</div>';
@@ -1598,6 +1599,61 @@ async function copiarTexto(txt) {
     return ok;
   }
 }
+// ------ precificação (analise/precificar.py): por quanto vender e se vale evoluir/subir antes
+const ROT_VENDA = { rapido: 'Rápido', normal: 'Normal', paciente: 'Paciente' };
+const DICA_VENDA = {
+  rapido: '1 abaixo do anúncio parecido mais barato (1º da fila), sem passar do preço justo nem descer do piso das vendas parecidas',
+  normal: 'o preço justo (vendas parecidas dos últimos 14 dias ou o modelo)',
+  paciente: 'o p75 das vendas parecidas, pelo menos 15% acima do justo: espera o comprador certo',
+};
+const gemasTxt = (v) => (v == null ? '—' : htmlPreco(v, 'gems'));
+function htmlPrecosVenda(p, pr) {
+  if (!p || !p.pode_vender) return `<p class="aviso">${esc(p ? p.motivo : 'sem dados')}</p>`;
+  const ordem = [p.moeda, ...Object.keys(p.moedas).filter((m) => m !== p.moeda)];
+  let h = `<p class="explica" style="margin:4px 0 6px">Anuncie em <b>${p.moeda === 'gems' ? 'gemas' : 'coins'}</b>. ${esc(p.motivo)}</p>`;
+  for (const m of ordem) {
+    const x = p.moedas[m];
+    if (!x) continue;
+    const conc = [];
+    conc.push(x.anuncios_parecidos ? `${x.anuncios_parecidos} anúncio(s) parecido(s) na loja, o mais barato por ${fmtNum(x.menor_parecido, m)}` : 'nenhum anúncio parecido na loja');
+    if (x.teto_melhor) conc.push(`<span class="margem-neg">há um anúncio melhor (nível, nota e potência pelo menos iguais) por ${fmtNum(x.menor_melhor, m)}: os preços ficam abaixo dele</span>`);
+    if (x.concorrencia_abaixo_do_piso) conc.push('o anúncio parecido mais barato está abaixo do que essas vendas costumam sair: o rápido fica no piso, sem ficar em 1º da fila');
+    h += `<table class="tabela pkv-tab${m === p.moeda ? '' : ' pkv-outra'}">
+      <tr><th>${m === 'gems' ? 'Em gemas' : 'Em coins'}</th><th class="num">Anunciar por</th><th class="num">Comissão</th><th class="num">Você recebe</th>${m === 'coins' ? '<th class="num">Em gemas</th>' : ''}<th class="num" title="Das vendas parecidas dos últimos 14 dias, quantas saíram por esse preço ou mais">Vendas ≥</th></tr>
+      ${['rapido', 'normal', 'paciente'].map((k) => { const o = x.opcoes[k]; return `<tr title="${esc(DICA_VENDA[k])}"><td>${ROT_VENDA[k]}</td><td class="num">${htmlPreco(o.preco, m)}</td><td class="num">${fmtNum(o.taxa, m)}</td><td class="num"><b>${fmtNum(o.liquido, m)}</b></td>${m === 'coins' ? `<td class="num">${gemasTxt(o.liquido_gemas)}</td>` : ''}<td class="num">${o.vendas_acima == null ? '—' : o.vendas_acima + '%'}</td></tr>`; }).join('')}
+    </table>
+    <p class="aviso" style="margin:2px 0 8px">Preço justo ${htmlPreco(x.justo, m)} <span class="conf ${x.confianca}">${x.confianca}</span> (${esc(x.metodo)}, ${x.comps} vendas) · ${x.vendas_parecidas_14d} vendas parecidas em 14 dias (${nf(1).format(x.vendas_dia)}/dia) · ${conc.join(' · ')}</p>`;
+  }
+  return h + `<p class="aviso">A diária do anúncio é de ${fmtNum(pr.diaria_coins, 'coins')} coins por dia${pr.coins_por_gema ? ` (~${nf(1).format(pr.diaria_coins / pr.coins_por_gema)} gema)` : ''}; "em gemas" já desconta 1 diária.</p>`;
+}
+function htmlVale(v, pr, f, nome) {
+  const base = pr.valor_agora;
+  const hora = pr.valor_hora;
+  const pedras = f && v.pedras.length
+    ? `Pedras: ${v.pedras.map((x) => `${esc(x.nome)} ${x.gemas == null ? '<span class="margem-neg">sem preço</span>' : `(~${x.moeda === 'coins' ? fmtNum(x.preco, 'coins') + ' coins = ' : ''}${nf(x.gemas < 1 ? 2 : 1).format(x.gemas)} gema)`}`).join(', ')}.` : '';
+  let titulo;
+  const m = v.melhor;
+  if (v.sem_preco) titulo = `<span class="margem-neg">Sem preço de mercado para ${esc(nome)} com essa nota: não dá para dizer.</span>`;
+  else if (!v.vale) {
+    titulo = `<span class="margem-neg">Não vale a pena${f ? ' evoluir' : ' subir'} para vender.</span> ${base > 0 ? `Vender agora rende ~${nf(1).format(base)} gemas líquidas` : 'Agora ele não vai ao mercado'}${hora != null ? `, e nenhum ponto paga ${nf(1).format(hora)} gemas por hora caçada` : ', e nenhum ponto rende mais que isso'}.`;
+  } else {
+    const ate = f && m.nivel === f.caminho[f.caminho.length - 1].nivel ? `evolua (Nv ${nf(0).format(m.nivel)}) e venda` : `${f ? 'evolua e suba' : 'suba'} até o <b>Nv ${nf(0).format(m.nivel)}</b> e venda`;
+    titulo = `<span class="margem-pos">Vale: ${ate}.</span> Em ${fmtHoras(m.horas)} caçando, ele passa a valer ~${nf(1).format(m.valor)} gemas líquidas, <b>+${nf(1).format(m.ganho)}</b> sobre vender agora${f ? ' (já sem as pedras)' : ''}: <b>${m.gemas_h == null ? '—' : nf(2).format(m.gemas_h)} gemas por hora</b>${hora != null ? `, ${nf(1).format(m.lucro_tempo)} depois de pagar a sua hora` : ''}.`;
+  }
+  const linhas = v.pontos.map((x) => `<tr class="${x.melhor ? 'pkv-melhor' : ''}"><td class="num">${nf(0).format(x.nivel)}</td><td class="num">${fmtHoras(x.horas)}</td><td class="num">${x.valor == null ? '<span class="aviso">não vende</span>' : gemasTxt(x.valor)}${x.moeda === 'coins' ? ' <span class="aviso">(coins)</span>' : ''}</td><td class="num">${x.ganho == null ? '—' : `<span class="${x.ganho > 0 ? 'margem-pos' : 'margem-neg'}">${x.ganho > 0 ? '+' : ''}${nf(1).format(x.ganho)}</span>`}</td><td class="num">${x.gemas_h == null ? '—' : nf(2).format(x.gemas_h)}</td>${hora != null ? `<td class="num">${x.lucro_tempo == null ? '—' : nf(1).format(x.lucro_tempo)}</td>` : ''}<td>${x.confianca ? `<span class="conf ${x.confianca}">${x.confianca}</span>` : ''}</td></tr>`).join('');
+  const noMelhor = v.no_melhor && v.no_melhor.pode_vender ? `<details class="pke-trilha"><summary>Preço de venda no Nv ${nf(0).format(m.nivel)}</summary>${htmlPrecosVenda(v.no_melhor, pr)}</details>` : '';
+  const naEvol = f && v.na_evolucao && v.na_evolucao.pode_vender && (!m || m.nivel !== f.caminho[f.caminho.length - 1].nivel)
+    ? `<details class="pke-trilha"><summary>Preço de venda logo ao evoluir (Nv ${nf(0).format(f.caminho[f.caminho.length - 1].nivel)})</summary>${htmlPrecosVenda(v.na_evolucao, pr)}</details>` : '';
+  return `<p style="margin:4px 0">${titulo}</p>
+    <p class="aviso" style="margin:2px 0 6px">Base: vender agora ~${nf(1).format(base)} gemas líquidas pelo preço justo. ${pedras} O preço de mercado sobe em degraus (faixas de nível &lt;100, 100, 101-200, 201-500, 501-1000, 1000+): o melhor ponto costuma ser a entrada de uma faixa.</p>
+    ${noMelhor}${naEvol}
+    <details class="pke-trilha"${v.vale ? '' : ' open'}><summary>Valor em cada nível</summary>
+      <div class="tabela-wrap" style="max-height:360px"><table class="tabela">
+        <tr><th class="num">Nv</th><th class="num">Tempo desde agora</th><th class="num">Vale (líquido)</th><th class="num">Ganho</th><th class="num" title="Ganho ÷ horas caçando desde agora">Gemas/h</th>${hora != null ? '<th class="num" title="Ganho − o valor da sua hora × as horas">Lucro − hora</th>' : ''}<th>Confiança</th></tr>
+        ${linhas || '<tr><td colspan="7" class="aviso">sem pontos com tempo (não mata em nenhuma hunt liberada?)</td></tr>'}
+      </table></div>
+    </details>`;
+}
 let ultimaEvolucao = null;
 function desenharEvolucao(d) {
   ultimaEvolucao = d;
@@ -1614,8 +1670,17 @@ function desenharEvolucao(d) {
       <div class="tile" title="${esc(tituloHunt(a.hunt))}"><div class="rot">XP/h agora</div><div class="val">${a.xp_h != null ? curto(a.xp_h) : '—'}</div><div class="det">${a.hunt ? esc(a.hunt.nome) : 'não mata em nenhuma hunt'}${d.nivel_treinador ? '' : ' · sem limite de treinador'}</div></div>
       <div class="tile"><div class="rot">Preço justo agora</div><div class="val" style="font-size:15px">${htmlPrecoPk(a.preco)}</div>${an ? `<div class="det">anunciado por ${fmtNum(an.preco, an.moeda)} ${an.moeda === 'gems' ? 'gemas' : 'coins'}</div>` : ''}</div>
     </div>`;
+  const pr = d.precificacao;
+  if (pr) {
+    h += `<div class="caixa pkv"><h4 class="pke-tit">Preço de venda agora</h4>${htmlPrecosVenda(pr.agora, pr)}</div>`;
+    h += pr.avisos.map((x) => `<p class="aviso">⚠ ${esc(x)}</p>`).join('');
+  }
   if (d.ja_e_final) {
     h += '<div class="vazio">Este já é a última forma: não há evolução para simular.</div>';
+    if (pr && pr.subir) {
+      h += `<div class="caixa pkv"><h4 class="pke-tit">Vale a pena subir de nível antes de vender?</h4>
+        ${htmlVale(pr.subir, pr, null, a.nome)}</div>`;
+    }
   }
   for (const [i, f] of d.finais.entries()) {
     const ev = f.na_evolucao;
@@ -1635,6 +1700,7 @@ function desenharEvolucao(d) {
         ${alvo ? `<div class="tile" title="${esc(tituloHunt(alvo.hunt))}"><div class="rot">No Nv ${nf(0).format(alvo.nivel)}</div><div class="val">${alvo.xp_h != null ? curto(alvo.xp_h) + ' XP/h' : '—'}</div><div class="det">${fmtHoras(f.horas_ate_alvo)} até lá · ⚔ ${nf(0).format(alvo.poder)}</div></div>
           <div class="tile"><div class="rot">Preço justo no Nv ${nf(0).format(alvo.nivel)}</div><div class="val" style="font-size:15px">${htmlPrecoPk(alvo.preco)}</div></div>` : ''}
       </div>
+      ${pr && pr.finais[i] ? `<div class="pkv"><h4 class="pke-tit">Vale a pena evoluir para vender?</h4>${htmlVale(pr.finais[i], pr, f, f.final.nome)}</div>` : ''}
       ${htmlStats(a, ev, alvo)}
       <details class="pke-trilha"><summary>Trilha nível a nível</summary>
         <div class="tabela-wrap" style="max-height:420px"><table class="tabela">
@@ -1648,6 +1714,7 @@ function desenharEvolucao(d) {
 }
 function ligarEvolucao() {
   $('#pke-treinador').value = lerLocal('pk_treinador');
+  $('#pke-hora').value = lerLocal('pk_valor_hora');
   $('#pke-form').addEventListener('submit', (e) => analisarEvolucao(e));
   $('#pke-ler').addEventListener('click', colarFicha);
   $('#pke-corpo').addEventListener('click', async (e) => {
@@ -1662,7 +1729,7 @@ function ligarEvolucao() {
   // Mexeu no formulário: os stats da ficha colada não valem mais (a conta volta para a fórmula).
   // Treinador e "simular até" não mudam a ficha.
   $('#pke-form').addEventListener('input', (e) => {
-    if (!['pke-treinador', 'pke-alvo'].includes(e.target.id)) fichaColada = null;
+    if (!['pke-treinador', 'pke-alvo', 'pke-hora'].includes(e.target.id)) fichaColada = null;
   });
   // "Evoluir" num anúncio da busca: abre a análise com a ficha dele.
   $('#pkb-tabela').addEventListener('click', (e) => {

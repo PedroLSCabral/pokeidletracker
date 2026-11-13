@@ -73,7 +73,9 @@ OBJETIVOS = {
 
 # Faixas usadas pelo modelo (as mesmas da aba Padrões).
 FX_NIVEL = [99, 100, 200, 500, 1000, 10**9]                 # < 100 | 100 | 101-200 | 201-500 | 501-1000 | 1000+
-FX_NOTA = [3.4999, 3.6999, 3.8999, 4.0999, 4.2999, 9]
+# A nota acima de 4,3 se abre em mais faixas: em 11/2026 um Charizard de nota > 4,5 saía por ~3.400 gemas e um de
+# 4,1-4,5 por ~460; juntos numa faixa só, o preço justo de uma nota 4,35 e o de uma nota 6 saíam iguais.
+FX_NOTA = [3.4999, 3.6999, 3.8999, 4.0999, 4.2999, 4.4999, 4.9999, 5.9999, 10**9]
 
 
 # ------ IVs individuais

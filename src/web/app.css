@@ -489,3 +489,9 @@ input[type="checkbox"]:focus-visible { outline: 2px solid var(--rx-rosa); outlin
 .pke-colar textarea { width: 100%; box-sizing: border-box; font: 12px/1.4 ui-monospace, Consolas, monospace; resize: vertical; margin: 4px 0 6px; }
 .pke-copiar { font: 400 12px var(--f-texto); color: var(--tinta-3); white-space: nowrap; }
 .pke-nivel-ficha { width: 90px; padding: 3px 6px; font: 13px var(--f-texto); margin-left: 4px; }
+
+/* ---------- precificação de um Pokémon ---------- */
+.pkv { margin-top: 10px; }
+.pkv-tab { margin: 4px 0 0; }
+.pkv-outra { opacity: .8; }
+.tabela tr.pkv-melhor td { background: rgba(231, 122, 210, .22); font-weight: 700; }

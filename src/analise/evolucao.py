@@ -305,7 +305,7 @@ def _stats(bases, ivs, fatores, nivel) -> dict:
 
 def _pontos(ini: int, fim: int, fixos) -> list[int]:
     if fim <= ini:
-        return sorted({ini, *fixos})
+        return sorted({ini, *(x for x in fixos if x == ini)})
     pts = {ini, fim, *(x for x in fixos if ini <= x <= fim)}
     for i in range(1, PONTOS_TRILHA):
         pts.add(int(round(ini * (fim / ini) ** (i / PONTOS_TRILHA))))
@@ -328,11 +328,38 @@ def _hunt(r: dict | None) -> dict | None:
             "morre": r["morre"]}
 
 
+def _trilha(m: caca.Motor, xp, pts: list[int], forma_em) -> list[dict]:
+    """O XP/h e o tempo acumulado em cada ponto da trilha. `forma_em(nível)` diz a forma naquele nível e
+    `xp(forma, nível)` é o `Motor.xp_h` com o cache da análise. De um ponto ao próximo vale a forma do ponto de
+    partida (a evolução cai num ponto da trilha); o tempo é o XP que falta ÷ a média harmônica do XP/h nas
+    duas pontas. Depois de um trecho sem hunt (não mata em nenhuma), o tempo fica None."""
+    trilha, horas, sem_hunt = [], 0.0, False
+    for i, nv in enumerate(pts):
+        f = forma_em(nv)
+        r = xp(f, nv)
+        if i:
+            ant = pts[i - 1]
+            fa = forma_em(ant)
+            ra, rb = xp(fa, ant), xp(fa, nv)
+            dxp = xp_total(nv) - xp_total(ant)
+            if ra and rb and ra["xp_h"] > 0 and rb["xp_h"] > 0:
+                horas += dxp * (1 / ra["xp_h"] + 1 / rb["xp_h"]) / 2
+            else:
+                sem_hunt = True
+        trilha.append({"nivel": nv, "id": f, "nome": m.esp[f]["n"], "xp_h": round(r["xp_h"]) if r else None,
+                       "hunt": r["hunt"] if r else None, "horas": None if sem_hunt else round(horas, 2)})
+    return trilha
+
+
 def analisar(ficha: dict, nivel_treinador: int | None = None, nivel_alvo: int | None = None, comps=None,
-             m: caca.Motor | None = None) -> dict:
+             m: caca.Motor | None = None, trilha_ate: int | None = None, niveis_extra=()) -> dict:
     """A ficha de um Pokémon (`species_id`, `nivel`, `ivs`, `qualidade`, `potencia`, `shiny` e, se houver,
     `stats`, `nota`, `poder`, `refino`) → a forma de agora e cada evolução final com nota, stats, XP/h, a trilha
-    nível a nível e o preço justo. `comps` é o `pokemon.Comparaveis` (sem ele, sai sem preço)."""
+    nível a nível e o preço justo. `comps` é o `pokemon.Comparaveis` (sem ele, sai sem preço).
+
+    `trilha_ate` estica a trilha além do alvo (a precificação procura até que nível vale a pena subir) e
+    `niveis_extra` garante pontos nesses níveis (as viradas de faixa do preço). Se o Pokémon já é a última
+    forma e `trilha_ate` vem, `subir` traz a trilha dele mesmo, sem evoluir."""
     m = m or caca.motor()
     arv = Arvore(m)
     sid = int(ficha["species_id"])
@@ -396,31 +423,18 @@ def analisar(ficha: dict, nivel_treinador: int | None = None, nivel_alvo: int | 
                            "pedra": _pedra(m, tipo, shiny)})
         nivel_final = etapas[-1]["nivel"]
         alvo = max(nivel_final, int(nivel_alvo) if nivel_alvo else nivel_final)
-        trilha, horas, sem_hunt = [], 0.0, False
-        pts = _pontos(L0, alvo, [x["nivel"] for x in etapas])
+        fim = max(alvo, int(trilha_ate or 0))
+        pts = _pontos(L0, fim, [x["nivel"] for x in etapas] + [alvo] + list(niveis_extra))
 
-        def forma_em(nv):
+        def forma_em(nv, etapas=etapas):
             f = sid
             for x in etapas:
                 if x["nivel"] <= nv:
                     f = x["id"]
             return f
 
-        for i, nv in enumerate(pts):
-            f = forma_em(nv)
-            r = xp(f, nv)
-            if i:
-                # De um ponto ao próximo vale a forma do ponto de partida (a evolução cai num ponto da trilha).
-                ant = pts[i - 1]
-                fa = forma_em(ant)
-                ra, rb = xp(fa, ant), xp(fa, nv)
-                dxp = xp_total(nv) - xp_total(ant)
-                if ra and rb and ra["xp_h"] > 0 and rb["xp_h"] > 0:
-                    horas += dxp * (1 / ra["xp_h"] + 1 / rb["xp_h"]) / 2
-                else:
-                    sem_hunt = True
-            trilha.append({"nivel": nv, "id": f, "nome": m.esp[f]["n"], "xp_h": round(r["xp_h"]) if r else None,
-                           "hunt": r["hunt"] if r else None, "horas": None if sem_hunt else round(horas, 2)})
+        trilha = _trilha(m, xp, pts, forma_em)
+        h_alvo = next((p["horas"] for p in trilha if p["nivel"] == alvo), None)
         h_evol = next((p["horas"] for p in trilha if p["nivel"] == nivel_final), None)
         finais.append({
             "final": {"id": fid, "nome": efin["n"], "tipos": efin["t"]},
@@ -428,10 +442,14 @@ def analisar(ficha: dict, nivel_treinador: int | None = None, nivel_alvo: int | 
             "mercado_ok": shiny or pot >= 5 or nota >= MERCADO_NOTA_MIN - 1e-9,
             "na_evolucao": forma(fid, nivel_final, nota),
             "no_alvo": forma(fid, alvo, nota) if alvo != nivel_final else None,
-            "horas_ate_evoluir": h_evol, "horas_ate_alvo": None if sem_hunt else round(horas, 2),
+            "horas_ate_evoluir": h_evol, "horas_ate_alvo": h_alvo,
             "trilha": trilha,
         })
     finais.sort(key=lambda f: -f["nota"])
+    subir = None
+    if not finais and trilha_ate and int(trilha_ate) > L0:
+        pts = _pontos(L0, int(trilha_ate), list(niveis_extra))
+        subir = _trilha(m, xp, pts, lambda nv: sid)
     if treinador:
         teto = treinador + FOLGA_NIVEL_POKEMON
         if any(f["caminho"][-1]["nivel"] > teto for f in finais) or (nivel_alvo and int(nivel_alvo) > teto):
@@ -440,7 +458,7 @@ def analisar(ficha: dict, nivel_treinador: int | None = None, nivel_alvo: int | 
     return {"atual": atual, "finais": finais, "nivel_treinador": treinador, "avisos": avisos,
             "fatores": dict(zip(STATS, fat)),   # para a página montar a ficha simulada em qualquer nível
             "ivs": dict(zip(STATS, ivs)), "qualidade": q, "potencia": pot, "shiny": shiny,
-            "ja_e_final": not finais}
+            "ja_e_final": not finais, "subir": subir, "nota_atual_mercado": ficha.get("nota") or nota0}
 
 
 # ---------------------------------------------------------------- entradas

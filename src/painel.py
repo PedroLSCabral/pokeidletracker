@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import caminhos  # noqa: E402
 import notificar  # noqa: E402
 from analise import pokemon as analise_pokemon  # noqa: E402
-from analise import caca, evolucao, pvp, sinais, venda  # noqa: E402
+from analise import caca, evolucao, precificar, pvp, sinais, venda  # noqa: E402
 from coleta import coletor, importer  # noqa: E402
 
 HOST, PORT = "127.0.0.1", 8770
@@ -498,10 +498,17 @@ def api_evolucao(con, q: dict) -> dict:
         if q.get("refino") == "1":
             ficha["refino"] = 1
     alvo = int(num("alvo")) or None
-    r = evolucao.analisar(ficha, int(num("treinador")) or None, alvo, analise_pokemon.comparaveis(con), m)
+    treinador = int(num("treinador")) or None
+    comps = analise_pokemon.comparaveis(con)
+    # A trilha vai até o teto do jogo (treinador + 5), passando pela entrada de cada faixa de preço: é onde a
+    # precificação procura até que nível vale a pena subir antes de vender.
+    r = evolucao.analisar(ficha, treinador, alvo, comps, m, trilha_ate=precificar.horizonte(treinador),
+                          niveis_extra=precificar.ENTRADAS_FAIXA)
     if not m.tem_evolucoes:
         r["avisos"].insert(0, "o catálogo do jogo ainda não tem a árvore de evolução: o robô baixa"
                               " o catálogo de novo em até 1 dia")
+    valor_hora = num("valor_hora") if q.get("valor_hora", "").strip() else None
+    r["precificacao"] = precificar.precificar(con, comps, r, ficha, valor_hora)
     return r | {"anuncio": ficha.get("anuncio")}
 
 

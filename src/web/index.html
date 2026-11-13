@@ -139,7 +139,7 @@
   <section id="aba-pokemon" class="aba-corpo hidden">
     <div class="pk-sub" role="tablist">
       <button class="chip ativa" data-pksub="buscar">Encontrar Pokémon</button>
-      <button class="chip" data-pksub="evolucao">Analisar um Pokémon</button>
+      <button class="chip" data-pksub="evolucao">Analisar e precificar</button>
       <button class="chip" data-pksub="pvp">PvP</button>
       <button class="chip" data-pksub="padroes">Padrões do mercado</button>
       <button class="chip" data-pksub="vendas">Vendas recentes</button>
@@ -170,7 +170,7 @@
     </div>
 
     <div class="janela pk-painel hidden" id="pk-evolucao">
-      <div class="janela-titulo">Analisar um Pokémon até a evolução final <span class="sub" id="pke-sub"></span></div>
+      <div class="janela-titulo">Analisar e precificar um Pokémon <span class="sub" id="pke-sub"></span></div>
       <div class="janela-corpo">
         <details class="pke-colar" id="pke-colar">
           <summary>Colar a ficha copiada do jogo</summary>
@@ -194,6 +194,7 @@
           <label>IV SPD <input class="campo" data-pkeiv="speed" type="number" min="1" max="32" step="1" required placeholder="1-32"></label>
           <label title="Só entram as hunts que o seu treinador já libera">Seu nível de treinador <input id="pke-treinador" class="campo" type="number" min="1" placeholder="sem limite"></label>
           <label title="Até que nível simular depois da evolução final (vazio = o nível em que ela acontece)">Simular até o nível <input id="pke-alvo" class="campo" type="number" min="1" placeholder="o da evolução"></label>
+          <label title="Quanto vale para você uma hora deste Pokémon caçando, em gemas (vazio = escolhe o nível de mais gemas por hora)">Sua hora vale (gemas) <input id="pke-hora" class="campo" type="number" min="0" step="0.1" placeholder="opcional"></label>
           <button class="btn-primario" type="submit">Analisar</button>
         </form>
         <p class="explica">Digite a ficha do seu Pokémon (ou clique em <b>Evoluir</b> num anúncio da busca). A evolução mantém nível, IVs, qualidade, potência e shiny e troca as bases da espécie. A <b>nota na evolução final</b> é a mesma conta do "Potencial na evolução final" da calculadora do jogo: a nota nunca cai, sobe pelo menos 0,1 por estágio. O XP/h e o tempo vêm do mesmo motor de caça da busca, nível a nível, supondo que você evolui assim que chega ao nível e que o Pokémon leva o XP inteiro de cada abate.</p>
