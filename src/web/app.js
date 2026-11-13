@@ -1515,7 +1515,83 @@ async function analisarEvolucao(e, anuncio = null) {
   }
   desenharEvolucao(d);
 }
+// A ficha da forma final no mesmo modelo que o jogo copia (e que `lerFichaJogo` lê de volta).
+const BANDAS_QUALIDADE = [[0.8, 0.9, 5], [0.9, 1.0, 5], [1.0, 1.1, 34.03846], [1.1, 1.2, 20], [1.2, 1.3, 10], [1.3, 1.4, 10],
+  [1.4, 1.5, 10], [1.5, 1.6, 5], [1.7, 1.8, 0.67308], [1.8, 1.8, 0.28846]];
+function percentilQualidade(q) {   // percentilQualidade de shared/nota-pokemon.mjs
+  const v = Math.min(1.8, Math.max(0.8, Number(q) || 0.8));
+  let acc = 0;
+  for (const [lo, hi, ch] of BANDAS_QUALIDADE) {
+    if (v < lo) break;
+    if (v >= hi) { acc += ch; continue; }
+    acc += ch * ((v - lo) / (hi - lo));
+    break;
+  }
+  return Math.min(100, Math.max(0, acc));
+}
+const POTENCIA_TXT = { 1: 'P1 (sem bônus)', 2: 'P2 (×1.05)', 3: 'P3 (×1.1)', 4: 'P4 (×1.25)', 5: 'P5 (×2)' };
+const num2 = (v) => String(Math.round(v * 100) / 100);
+function fichaSimulada(d, f) {
+  const x = f.no_alvo || f.na_evolucao;
+  const ivs = Object.keys(NOMES_STAT).map((k) => d.ivs[k]);
+  const bases = Object.keys(NOMES_STAT).map((k) => x.bases[k]);
+  const stats = Object.keys(NOMES_STAT).map((k) => x.stats[k]);
+  const soma = (v) => v.reduce((s, n) => s + n, 0);
+  const faixa = f.faixa.charAt(0).toUpperCase() + f.faixa.slice(1);
+  const caminho = [`${d.atual.nome} Nv ${d.atual.nivel}`].concat(f.caminho.map((c) => `${c.nome} (Nv ${c.nivel_jogo}${c.pedra ? ', ' + c.pedra : ''})`)).join(' → ');
+  return `# ${x.nome} — ficha do PokeIdle (simulada)
+
+Ficha de um pokemon do PokeIdle, um MMO idle de pokemon. Os números são os do jogo, que tem regras próprias: use a regra de cálculo do fim desta ficha, e não a dos jogos oficiais.
+
+Esta ficha é uma SIMULAÇÃO do PokeIdle Tracker: é o ${d.atual.nome} de nível ${d.atual.nivel} depois de evoluir (${caminho}). A evolução mantém nível, IVs, qualidade, potência e shiny, e troca as bases da espécie.
+
+## O pokemon
+
+- Espécie: ${x.nome} (#${x.id}) — ${x.tipos.join(' / ')}
+- Shiny: ${d.shiny ? 'sim' : 'não'}
+- Nível: ${x.nivel}
+- Potência: ${POTENCIA_TXT[d.potencia] || 'P' + d.potencia}
+- Qualidade: ${num2(d.qualidade)} (melhor que ${Math.floor(percentilQualidade(d.qualidade))}% dos nascimentos)
+- IV somado: ${soma(ivs)} de 192
+- Nota da Calculadora: ${num2(f.nota)} de 10 (${faixa})
+- Poder (⚔): ${x.poder}
+- HP de combate: ${x.stats.hp * 12} (o HP do stat × 12)
+
+## Stats
+
+| Stat | Base da espécie | IV (1–32) | Stat atual (nível ${x.nivel}) |
+|---|---|---|---|
+${Object.values(NOMES_STAT).map((n, i) => `| ${n} | ${bases[i]} | ${ivs[i]} | ${stats[i]} |`).join('\n')}
+| Total | ${soma(bases)} | ${soma(ivs)} | ${soma(stats)} |
+
+## Como o jogo calcula
+
+- Stat = (base + refino + 2 × IV) × (nível ÷ 100) × qualidade^expoente × potência × shiny × lendário
+- Expoente da qualidade: 0.95 no HP e no SPD; 0.8 no ATK, DEF, SP.ATK e SP.DEF
+- Potência: P1 ×1 · P2 ×1.05 · P3 ×1.1 · P4 ×1.25 · P5 ×2
+- Shiny: ×3 em todos os stats
+- Lendário ou Mítico: ×4 em todos os stats (vale pela espécie)
+- IV: de 1 a 32 em cada stat (6 a 192 somados) · Qualidade: de 0.8 a 1.8
+- O refino é o "+N" comprado com pedras: soma na base, antes do IV e de todo multiplicador.
+- A Nota da Calculadora vai de 0 a 10 DENTRO da espécie: 0 é o pior nascimento possível dela, 10 é P5 + shiny + IV máximo. Evoluir nunca baixa a nota. Lendário não tem nota.
+`;
+}
+async function copiarTexto(txt) {
+  try {
+    await navigator.clipboard.writeText(txt);
+    return true;
+  } catch {
+    const ta = Object.assign(document.createElement('textarea'), { value: txt });
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
+}
+let ultimaEvolucao = null;
 function desenharEvolucao(d) {
+  ultimaEvolucao = d;
   const a = d.atual;
   const an = d.anuncio;
   $('#pke-sub').textContent = an ? `anúncio ${an.id}${an.ativo ? '' : ' (já saiu da loja)'}` : '';
@@ -1532,13 +1608,13 @@ function desenharEvolucao(d) {
   if (d.ja_e_final) {
     h += '<div class="vazio">Este já é a última forma: não há evolução para simular.</div>';
   }
-  for (const f of d.finais) {
+  for (const [i, f] of d.finais.entries()) {
     const ev = f.na_evolucao;
     const alvo = f.no_alvo;
     const ganho = ev.xp_h && a.xp_h ? ev.xp_h / a.xp_h : null;
     const caminho = [`${esc(a.nome)}`].concat(f.caminho.map((x) => `${esc(x.nome)} <span class="aviso">(Nv ${nf(0).format(x.nivel_jogo)}${x.pedra ? ', ' + esc(x.pedra) : ''})</span>`)).join(' → ');
     h += `<div class="caixa pke-final">
-      <h4 class="pke-tit">${esc(f.final.nome)} ${tagsTipo(f.final.tipos)}</h4>
+      <h4 class="pke-tit">${esc(f.final.nome)} ${tagsTipo(f.final.tipos)} <button type="button" class="chip pke-btn" data-copiar-ficha="${i}" title="Copia a ficha de ${esc(f.final.nome)} no Nv ${nf(0).format((alvo || ev).nivel)} no mesmo modelo que o jogo copia">Copiar ficha simulada</button></h4>
       <p class="explica" style="margin:4px 0 8px">${caminho}</p>
       <div class="tiles">
         <div class="tile"><div class="rot">Nota na evolução final</div><div class="val">${nf(3).format(f.nota)}</div><div class="det">${esc(f.faixa)} · ${f.mercado_ok ? '<span class="margem-pos">pode ir ao mercado</span>' : '<span class="margem-neg">abaixo de 3,5: não vai ao mercado</span>'}</div></div>
@@ -1564,6 +1640,13 @@ function ligarEvolucao() {
   $('#pke-treinador').value = lerLocal('pk_treinador');
   $('#pke-form').addEventListener('submit', (e) => analisarEvolucao(e));
   $('#pke-ler').addEventListener('click', colarFicha);
+  $('#pke-corpo').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-copiar-ficha]');
+    if (!b || !ultimaEvolucao) return;
+    const ok = await copiarTexto(fichaSimulada(ultimaEvolucao, ultimaEvolucao.finais[+b.dataset.copiarFicha]));
+    b.textContent = ok ? 'Copiada!' : 'Não deu para copiar';
+    setTimeout(() => { b.textContent = 'Copiar ficha simulada'; }, 2000);
+  });
   // Mexeu no formulário: os stats da ficha colada não valem mais (a conta volta para a fórmula).
   $('#pke-form').addEventListener('input', () => { fichaColada = null; });
   // "Evoluir" num anúncio da busca: abre a análise com a ficha dele.

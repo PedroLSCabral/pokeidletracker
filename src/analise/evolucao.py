@@ -371,7 +371,8 @@ def analisar(ficha: dict, nivel_treinador: int | None = None, nivel_alvo: int | 
     def forma(pid, nivel, nota):
         e = m.esp[pid]
         r = xp(pid, nivel)
-        return {"id": pid, "nome": e["n"], "tipos": e["t"], "nivel": nivel, "stats": _stats(e["b"], ivs, fat, nivel),
+        return {"id": pid, "nome": e["n"], "tipos": e["t"], "nivel": nivel, "bases": dict(zip(STATS, e["b"])),
+                "stats": _stats(e["b"], ivs, fat, nivel),
                 "poder": poder(nivel, ivs, q, pot, shiny, e["b"]), "xp_h": round(r["xp_h"]) if r else None,
                 "hunt": _hunt(r), "preco": preco(e["n"], nivel, nota)}
 
