@@ -33,7 +33,7 @@ import statistics
 import time
 from datetime import datetime
 
-from analise import evolucao, pokemon, venda
+from analise import caca, evolucao, pokemon, venda
 from analise.sinais import _sem_outliers
 from coleta import importer
 
@@ -45,6 +45,10 @@ NIVEL_MAX_SEM_TREINADOR = 1001
 # Sem "sua hora vale", só chama de "vale a pena" o que rende pelo menos isto por hora caçada: subir 360 h para
 # ganhar 0,2 gema/h tecnicamente dá lucro, mas não é recomendação.
 MIN_GEMAS_H = 1.0
+# A Shiny Stone de um tipo não vai ao mercado: é fabricada no Centro com N "Shiny Stone Fragment" (o N vem do
+# servidor em `shinyStone.custo`; o cliente usa 10 quando falta). O custo dela é N × o preço do fragmento.
+FRAGMENTO_SHINY = "Shiny Stone Fragment"
+FRAGMENTOS_POR_SHINY_STONE = 10
 # A entrada de cada faixa de nível do modelo de preço (FX_NIVEL: <100 | 100 | 101-200 | 201-500 | 501-1000 | 1000+).
 ENTRADAS_FAIXA = tuple(t + 1 for t in pokemon.FX_NIVEL[:-1])
 
@@ -223,6 +227,17 @@ def preco_item_gemas(con, nome: str, cb: float | None, t: int | None = None) -> 
     return min(rotas, key=lambda x: x["gemas"], default=None)
 
 
+def preco_pedra(con, nome: str, cb: float | None, n_frag: int = FRAGMENTOS_POR_SHINY_STONE) -> dict | None:
+    """Uma pedra de evolução; a Shiny Stone sai de `n_frag` fragmentos (a pedra pronta não se negocia)."""
+    if not nome.endswith("Shiny Stone"):
+        return preco_item_gemas(con, nome, cb)
+    f = preco_item_gemas(con, FRAGMENTO_SHINY, cb)
+    if not f:
+        return None
+    return {"gemas": round(f["gemas"] * n_frag, 2), "moeda": f["moeda"], "preco": f["preco"] * n_frag,
+            "fonte": f"{n_frag} × {FRAGMENTO_SHINY} ({f['fonte']})"}
+
+
 # ---------------------------------------------------------------- vale a pena evoluir / subir?
 
 def _avaliar_trilha(trilha, forma_id, nome, nota, base, custo, ficha, comps, cb, valor_hora) -> dict:
@@ -281,6 +296,10 @@ def precificar(con, comps, r: dict, ficha: dict, valor_hora: float | None = None
     base = max(0.0, base_v["gemas"]) if base_v else 0.0
     f_dados = {"shiny": r["shiny"], "potencia": r["potencia"]}
     pedras_cache: dict = {}
+    try:
+        n_frag = caca.motor().shiny_stone_custo or FRAGMENTOS_POR_SHINY_STONE
+    except caca.SemDados:
+        n_frag = FRAGMENTOS_POR_SHINY_STONE
     saida_finais, avisos = [], []
     for f in r["finais"]:
         custo, pedras, falta = 0.0, [], []
@@ -289,7 +308,7 @@ def precificar(con, comps, r: dict, ficha: dict, valor_hora: float | None = None
             if not nome_p:
                 continue
             if nome_p not in pedras_cache:
-                pedras_cache[nome_p] = preco_item_gemas(con, nome_p, cb)
+                pedras_cache[nome_p] = preco_pedra(con, nome_p, cb, n_frag)
             pr = pedras_cache[nome_p]
             pedras.append({"nome": nome_p, "gemas": pr and pr["gemas"], "moeda": pr and pr["moeda"],
                            "preco": pr and pr["preco"], "fonte": pr and pr["fonte"]})

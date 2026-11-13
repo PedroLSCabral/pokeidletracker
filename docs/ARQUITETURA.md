@@ -132,7 +132,7 @@ inicialização com o Windows. Se for preciso mover, rode `python src/bandeja.py
   2. Vê o que está na hora (`proximas_tarefas()`): o export (quando o jogo libera), a vitrine (a cada minuto) e a loja de Pokémon (a cada 3 h).
   3. Faz cada uma: `pedir_export()`, `ler_vitrine()`, `varrer_loja_pokemon()`. Depois, `checar_alertas()`.
   4. Dorme até a próxima tarefa (no mínimo 1 s, no máximo 10 min). Um ping a cada 25 s mantém a conexão viva.
-- **Welcome:** ao entrar, `caca.guardar_welcome()` tira dele as hunts, as constantes de caça e a tabela de tipos e grava em `data/jogo/welcome-dados.json` (o estado da conta não é guardado). Grava também `welcome-esqueleto.json`, só com as chaves, para conferir o formato quando o jogo mudar.
+- **Welcome:** ao entrar, `caca.guardar_welcome()` tira dele as hunts, as constantes de caça (e quantos fragmentos fazem uma Shiny Stone) e a tabela de tipos e grava em `data/jogo/welcome-dados.json` (o estado da conta não é guardado). Grava também `welcome-esqueleto.json`, só com as chaves, para conferir o formato quando o jogo mudar.
 - **`Sessao`:**
   - um leitor em segundo plano filtra as mensagens que interessam e as põe numa fila;
   - `pedir()` descarta o que chegou sem ser pedido, envia e espera a resposta que satisfaz a condição;
@@ -431,7 +431,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   - *normal:* o preço justo; *paciente:* o p75 das vendas parecidas, no mínimo justo × 1,15;
   - os anúncios **melhores** (nível, nota − 0,05 e potência pelo menos iguais) mais baratos formam uma fila: o rápido fica abaixo do 1º, o normal do 2º e o paciente do 3º; o anúncio que está sendo analisado não conta como concorrente;
   - a moeda segue a regra dos itens: coins só se render `PREFERENCIA_GEMAS` (5%) a mais depois da troca.
-- **`preco_item_gemas`:** custo de uma pedra em gemas, pela rota mais barata (gemas, ou coins pelo câmbio + 15%). As Shiny Stones por tipo não têm mercado próprio e ficam sem preço.
+- **`preco_item_gemas`:** custo de uma pedra em gemas, pela rota mais barata (gemas, ou coins pelo câmbio + 15%). A Shiny Stone de um tipo não se negocia (é fabricada no Centro): `preco_pedra` cobra N × o preço do `Shiny Stone Fragment`, com N do `shinyStone.custo` do welcome (`Motor.shiny_stone_custo`, guardado em `consts` por `guardar_welcome`) ou 10, o padrão do cliente.
 - **`precificar(con, comps, r, ficha, valor_hora)`:** com o resultado de `evolucao.analisar` (trilha até `horizonte`: treinador + 5, ou o Nv 1001 sem treinador, com pontos em `ENTRADAS_FAIXA`, a entrada de cada faixa de nível do modelo), avalia em cada ponto da trilha já na forma final o ganho = valor líquido pelo justo (o maior visto até ali: subir não barateia) − vender agora pelo preço normal − pedras, e as gemas por hora desde agora. O melhor ponto é o de mais gemas/h, e só "vale" com pelo menos `MIN_GEMAS_H` (1) por hora; com `valor_hora`, o de maior ganho − valor_hora × horas. `pode_vender` aplica a regra do mercado (nível ≥ 50 e nota ≥ 3,5, salvo shiny e P5).
 - **Limites:** o preço anda em degraus (faixas de nível e de nota do modelo), então o melhor ponto costuma cair na entrada de uma faixa; não avalia vender numa forma intermediária; o tempo supõe caçar sem parar.
 

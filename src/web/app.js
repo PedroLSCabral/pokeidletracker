@@ -1616,7 +1616,7 @@ function htmlPrecosVenda(p, pr) {
     if (!x) continue;
     const conc = [];
     conc.push(x.anuncios_parecidos ? `${x.anuncios_parecidos} anúncio(s) parecido(s) na loja, o mais barato por ${fmtNum(x.menor_parecido, m)}` : 'nenhum anúncio parecido na loja');
-    if (x.teto_melhor) conc.push(`<span class="margem-neg">há um anúncio melhor (nível, nota e potência pelo menos iguais) por ${fmtNum(x.menor_melhor, m)}: os preços ficam abaixo dele</span>`);
+    if (x.teto_melhor) conc.push(`<span class="margem-neg">${x.anuncios_melhores} anúncio(s) melhor(es) (nível, nota e potência pelo menos iguais), o mais barato por ${fmtNum(x.menor_melhor, m)}: o rápido fica abaixo do 1º${x.teto_normal ? ', o normal abaixo do 2º e o paciente abaixo do 3º' : ''}</span>`);
     if (x.concorrencia_abaixo_do_piso) conc.push('o anúncio parecido mais barato está abaixo do que essas vendas costumam sair: o rápido fica no piso, sem ficar em 1º da fila');
     h += `<table class="tabela pkv-tab${m === p.moeda ? '' : ' pkv-outra'}">
       <tr><th>${m === 'gems' ? 'Em gemas' : 'Em coins'}</th><th class="num">Anunciar por</th><th class="num">Comissão</th><th class="num">Você recebe</th>${m === 'coins' ? '<th class="num">Em gemas</th>' : ''}<th class="num" title="Das vendas parecidas dos últimos 14 dias, quantas saíram por esse preço ou mais">Vendas ≥</th></tr>

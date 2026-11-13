@@ -110,6 +110,8 @@ def guardar_welcome(msg: dict) -> dict:
                     consts[k] = v
                 elif k == "tabelaTipos" and isinstance(v, dict) and tipos is None:
                     tipos = v
+                elif k == "shinyStone" and isinstance(v, dict) and isinstance(v.get("custo"), (int, float)):
+                    consts["shinyStoneCusto"] = v["custo"]   # fragmentos por Shiny Stone (analise/precificar.py)
                 elif isinstance(v, list) and len(v) > 50 and all(isinstance(x, dict) and "slug" in x for x in v[:20]):
                     if hunts is None or len(v) > len(hunts):
                         hunts = v
@@ -336,6 +338,7 @@ class Motor:
         self.tem_evolucoes = any("e" in v for v in self.esp.values())
         c = {**PADRAO_CONSTS, **(welcome.get("consts") or {})}
         self.ampl, self.mult_hp, self.mult_dano = c["ampliacaoHunt"], c["multHpSelvagem"], c["multDanoSelvagem"]
+        self.shiny_stone_custo = c.get("shinyStoneCusto")   # None até o robô entrar com esta versão
         self.tabela = welcome.get("tabelaTipos") or _tabela_padrao()
         self._ef: dict = {}
         self.hunts = []
