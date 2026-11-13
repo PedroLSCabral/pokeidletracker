@@ -479,7 +479,7 @@ def api_evolucao(con, q: dict) -> dict:
     if q.get("anuncio", "").strip():
         ficha = evolucao.ficha_do_anuncio(con, int(num("anuncio")))
     else:
-        sid = evolucao.especie_por_nome(m, q.get("especie", "")[:40])
+        sid = evolucao.especie_por_nome(m, (q.get("especie_id") or q.get("especie", ""))[:40])
         if not sid:
             raise ValueError("escolha uma espécie da lista")
         if not 1 <= num("nivel") <= 1_000_000:
@@ -487,6 +487,16 @@ def api_evolucao(con, q: dict) -> dict:
         ficha = {"species_id": sid, "nivel": int(num("nivel")), "qualidade": num("qualidade", 1.0),
                  "potencia": int(num("potencia", 1)), "shiny": q.get("shiny") == "1",
                  "ivs": {k: int(num(k, 1)) for k in evolucao.STATS}}
+        # Da ficha copiada do jogo: os stats reais (já com lendário e refino), a nota e o poder dele.
+        stats = {k: int(num("st_" + k)) for k in evolucao.STATS if num("st_" + k) > 0}
+        if len(stats) == len(evolucao.STATS):
+            ficha["stats"] = stats
+        if q.get("nota", "").strip():
+            ficha["nota"] = num("nota")
+        if q.get("poder", "").strip():
+            ficha["poder"] = int(num("poder"))
+        if q.get("refino") == "1":
+            ficha["refino"] = 1
     alvo = int(num("alvo")) or None
     r = evolucao.analisar(ficha, int(num("treinador")) or None, alvo, analise_pokemon.comparaveis(con), m)
     if not m.tem_evolucoes:

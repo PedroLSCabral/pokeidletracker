@@ -484,3 +484,6 @@ input[type="checkbox"]:focus-visible { outline: 2px solid var(--rx-rosa); outlin
 .pke-stats { margin: 6px 0; }
 .pke-trilha summary { cursor: pointer; font: 700 12px/1.6 var(--f-titulo); color: var(--tinta-2); margin-top: 6px; }
 .chip.pke-btn { font-size: 11px; min-height: 26px; padding: 5px 9px; margin-left: 4px; }
+.pke-colar { margin-bottom: 10px; }
+.pke-colar summary { cursor: pointer; font: 700 12px/1.8 var(--f-titulo); color: var(--tinta-2); }
+.pke-colar textarea { width: 100%; box-sizing: border-box; font: 12px/1.4 ui-monospace, Consolas, monospace; resize: vertical; margin: 4px 0 6px; }

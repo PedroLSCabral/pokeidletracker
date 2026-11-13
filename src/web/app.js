@@ -1430,6 +1430,52 @@ function htmlStats(...formas) {
   return `<table class="tabela pke-stats"><tr><th></th>${Object.values(NOMES_STAT).map((n) => `<th class="num">${n}</th>`).join('')}</tr>
     ${formas.filter(Boolean).map((f) => `<tr><td>${esc(f.nome)} Nv ${nf(0).format(f.nivel)}</td>${Object.keys(NOMES_STAT).map((k) => `<td class="num">${nf(0).format(f.stats[k])}</td>`).join('')}</tr>`).join('')}</table>`;
 }
+// A ficha que o jogo copia ("# Larvitar — ficha do PokeIdle", em Markdown): espécie com o número, shiny, nível,
+// potência, qualidade, nota, poder e a tabela de stats (base, IV, stat atual). Os stats vão junto para o servidor:
+// com eles a conta já inclui lendário e refino. Mexer no formulário depois descarta os stats colados.
+let fichaColada = null;
+const LINHAS_FICHA = [['HP', 'hp'], ['ATK', 'atk'], ['DEF', 'def'], ['SP.ATK', 'spAtk'], ['SP.DEF', 'spDef'], ['SPD', 'speed']];
+function lerFichaJogo(txt) {
+  const t = String(txt || '').replace(/\r/g, '');
+  const pega = (re) => (re.exec(t) || [])[1];
+  const inteiro = (s) => (s == null ? null : parseInt(String(s).replace(/\D/g, ''), 10) || null);
+  const dec = (s) => (s == null ? null : parseFloat(String(s).replace(',', '.')));
+  const esp = /Esp[ée]cie:\s*(.+?)\s*\(#(\d+)\)/i.exec(t);
+  if (!esp) throw new Error('não achei a linha "Espécie: Nome (#número)" na ficha');
+  const f = {
+    nome: esp[1].trim(), id: esp[2], shiny: /Shiny:\s*sim/i.test(t), ivs: {}, stats: {}, refino: false,
+    nivel: inteiro(pega(/N[íi]vel:\s*([\d.,]+)/i)), potencia: inteiro(pega(/Pot[êe]ncia:\s*P(\d)/i)) || 1,
+    qualidade: dec(pega(/Qualidade:\s*([\d.,]+)/i)), nota: dec(pega(/Nota da Calculadora:\s*([\d.,]+)/i)),
+    poder: inteiro(pega(/Poder[^:\n]*:\s*([\d.,]+)/i)),
+  };
+  for (const [rot, k] of LINHAS_FICHA) {
+    const m = new RegExp(`^\\|\\s*${rot.replace('.', '\\.')}\\s*\\|([^|]*)\\|([^|]*)\\|([^|]*)\\|`, 'mi').exec(t);
+    if (!m) throw new Error(`não achei a linha de ${rot} na tabela de stats`);
+    if (/\+\s*\d/.test(m[1])) f.refino = true;
+    f.ivs[k] = inteiro(m[2]);
+    f.stats[k] = inteiro(m[3]);
+  }
+  if (!f.nivel) throw new Error('não achei o nível na ficha');
+  return f;
+}
+function colarFicha() {
+  let f;
+  try {
+    f = lerFichaJogo($('#pke-texto').value);
+  } catch (err) {
+    $('#pke-ler-msg').textContent = err.message;
+    return;
+  }
+  $('#pke-esp').value = f.nome;
+  $('#pke-nivel').value = f.nivel;
+  $('#pke-qual').value = f.qualidade ?? '';
+  $('#pke-pot').value = String(f.potencia);
+  $('#pke-shiny').checked = f.shiny;
+  $$('[data-pkeiv]').forEach((i) => { i.value = f.ivs[i.dataset.pkeiv] ?? ''; });
+  fichaColada = f;
+  $('#pke-ler-msg').textContent = `${f.nome} Nv ${nf(0).format(f.nivel)} lido.`;
+  analisarEvolucao();
+}
 async function analisarEvolucao(e, anuncio = null) {
   e?.preventDefault();
   const p = { treinador: $('#pke-treinador').value, alvo: $('#pke-alvo').value };
@@ -1439,6 +1485,11 @@ async function analisarEvolucao(e, anuncio = null) {
     Object.assign(p, { especie: $('#pke-esp').value.trim(), nivel: $('#pke-nivel').value, qualidade: $('#pke-qual').value,
       potencia: $('#pke-pot').value, shiny: $('#pke-shiny').checked ? 1 : '' });
     $$('[data-pkeiv]').forEach((i) => { p[i.dataset.pkeiv] = i.value; });
+    if (fichaColada) {
+      Object.assign(p, { especie_id: fichaColada.id, nota: fichaColada.nota ?? '', poder: fichaColada.poder ?? '',
+        refino: fichaColada.refino ? 1 : '' });
+      Object.entries(fichaColada.stats).forEach(([k, v]) => { p['st_' + k] = v ?? ''; });
+    }
   }
   gravarLocal('pk_treinador', $('#pke-treinador').value);
   const botao = $('#pke-form button[type=submit]');
@@ -1453,6 +1504,7 @@ async function analisarEvolucao(e, anuncio = null) {
   } finally {
     botao.disabled = false;
   }
+  if (anuncio) fichaColada = null;
   if (anuncio) {   // a ficha do anúncio vai para o formulário, para poder mexer e simular de novo
     $('#pke-esp').value = d.atual.nome;
     $('#pke-nivel').value = d.atual.nivel;
@@ -1511,6 +1563,9 @@ function desenharEvolucao(d) {
 function ligarEvolucao() {
   $('#pke-treinador').value = lerLocal('pk_treinador');
   $('#pke-form').addEventListener('submit', (e) => analisarEvolucao(e));
+  $('#pke-ler').addEventListener('click', colarFicha);
+  // Mexeu no formulário: os stats da ficha colada não valem mais (a conta volta para a fórmula).
+  $('#pke-form').addEventListener('input', () => { fichaColada = null; });
   // "Evoluir" num anúncio da busca: abre a análise com a ficha dele.
   $('#pkb-tabela').addEventListener('click', (e) => {
     const b = e.target.closest('[data-evoluir]');

@@ -172,6 +172,13 @@
     <div class="janela pk-painel hidden" id="pk-evolucao">
       <div class="janela-titulo">Analisar um Pokémon até a evolução final <span class="sub" id="pke-sub"></span></div>
       <div class="janela-corpo">
+        <details class="pke-colar" id="pke-colar">
+          <summary>Colar a ficha copiada do jogo</summary>
+          <p class="explica">No jogo, copie a ficha do Pokémon ("# Nome — ficha do PokeIdle") e cole aqui: o formulário é preenchido e a análise já roda, com os stats exatos da ficha.</p>
+          <textarea id="pke-texto" class="campo" rows="7" placeholder="# Larvitar — ficha do PokeIdle&#10;…"></textarea>
+          <button class="btn-primario" type="button" id="pke-ler">Ler ficha e analisar</button>
+          <span class="aviso" id="pke-ler-msg"></span>
+        </details>
         <form class="pk-form" id="pke-form" autocomplete="off">
           <label class="larga">Espécie <input id="pke-esp" class="campo" list="pke-lista" required placeholder="ex.: Larvitar"></label>
           <datalist id="pke-lista"></datalist>
