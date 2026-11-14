@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import sqlite3
 import threading
 import time
 import urllib.error
@@ -115,7 +116,8 @@ MENSAGENS = {"semJogador": "nenhum treinador com esse nick no Tracker",
 
 
 def preparar(con) -> None:
-    con.executescript(SCHEMA)
+    if not con.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pvp_cache'").fetchone():
+        con.executescript(SCHEMA)
 
 
 def tracker(con, rota: str, ttl_s: float | None = None, forcar: bool = False, **params) -> dict:
@@ -155,9 +157,12 @@ def tracker(con, rota: str, ttl_s: float | None = None, forcar: bool = False, **
             raise ErroPvP("o Tracker do jogo não respondeu") from None
         finally:
             _ultimo_pedido = time.time()
-    con.execute("INSERT OR REPLACE INTO pvp_cache (chave, ms, json) VALUES (?,?,?)",
-                (chave, int(agora * 1000), json.dumps(dados, ensure_ascii=False)))
-    con.commit()
+    try:
+        con.execute("INSERT OR REPLACE INTO pvp_cache (chave, ms, json) VALUES (?,?,?)",
+                    (chave, int(agora * 1000), json.dumps(dados, ensure_ascii=False)))
+        con.commit()
+    except sqlite3.OperationalError:   # banco travado (o robô gravando): segue sem guardar no cache
+        con.rollback()
     return dados | {"_ms": int(agora * 1000)}
 
 

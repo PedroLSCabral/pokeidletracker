@@ -225,20 +225,36 @@ def read_export(path: Path) -> list[dict]:
         return [parse_row(r) for r in csv.DictReader(f, delimiter=";")]
 
 
+CONNECT_TIMEOUT_S = 15    # quanto esperar por uma trava do banco (o robô grava o export em lote)
+
+
 def connect(db_path: Path = DB_PATH) -> sqlite3.Connection:
+    """Abre o banco e garante o esquema. Só escreve se faltar algo: o painel abre uma conexão por pedido, e
+    uma escrita em todo pedido disputava a trava com o robô. Se der erro aqui, a conexão é fechada na hora
+    (uma conexão largada com a transação aberta segurava a trava do banco e travava o painel inteiro)."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(db_path)
-    con.row_factory = sqlite3.Row
-    con.executescript(SCHEMA)
-    # Migração: horário exato (ms), só existe nas linhas vindas do coletor.
-    if "ts_ms" not in {r[1] for r in con.execute("PRAGMA table_info(trades)")}:
-        con.execute("ALTER TABLE trades ADD COLUMN ts_ms INTEGER")
-    if "icone" not in {r[1] for r in con.execute("PRAGMA table_info(itens)")}:
-        con.execute("ALTER TABLE itens ADD COLUMN icone TEXT")  # campo `icon` do items.json
-    con.executemany("INSERT INTO itens (id, nome, categoria) VALUES (?, ?, 'especial') "
-                    "ON CONFLICT(id) DO UPDATE SET nome = excluded.nome, categoria = 'especial'",
-                    ITENS_ESPECIAIS.items())
-    con.commit()
+    con = sqlite3.connect(db_path, timeout=CONNECT_TIMEOUT_S)
+    try:
+        con.row_factory = sqlite3.Row
+        tabelas = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'index')")}
+        if not set(re.findall(r"CREATE (?:TABLE|INDEX) IF NOT EXISTS (\w+)", SCHEMA)) <= tabelas:
+            con.executescript(SCHEMA)
+        # Migração: horário exato (ms), só existe nas linhas vindas do coletor.
+        if "ts_ms" not in {r[1] for r in con.execute("PRAGMA table_info(trades)")}:
+            con.execute("ALTER TABLE trades ADD COLUMN ts_ms INTEGER")
+        if "icone" not in {r[1] for r in con.execute("PRAGMA table_info(itens)")}:
+            con.execute("ALTER TABLE itens ADD COLUMN icone TEXT")  # campo `icon` do items.json
+        atuais = {r[0]: (r[1], r[2]) for r in con.execute(
+            f"SELECT id, nome, categoria FROM itens WHERE id IN ({','.join('?' * len(ITENS_ESPECIAIS))})",
+            list(ITENS_ESPECIAIS))}
+        if any(atuais.get(k) != (v, "especial") for k, v in ITENS_ESPECIAIS.items()):
+            con.executemany("INSERT INTO itens (id, nome, categoria) VALUES (?, ?, 'especial') "
+                            "ON CONFLICT(id) DO UPDATE SET nome = excluded.nome, categoria = 'especial'",
+                            ITENS_ESPECIAIS.items())
+        con.commit()
+    except BaseException:
+        con.close()
+        raise
     return con
 
 

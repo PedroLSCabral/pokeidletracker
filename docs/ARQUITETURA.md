@@ -617,6 +617,7 @@ Os módulos `shared/` do jogo são públicos (por exemplo, `https://pokeidle.io/
 
 ## 15. Armadilhas conhecidas
 
+- **Trava do banco:** o painel abre uma conexão por pedido e o robô grava o export em lote. `importer.connect()` só escreve se faltar esquema ou item especial, espera até 15 s por uma trava e fecha a conexão se der erro (uma conexão largada com a transação aberta, em 14/11/2026, segurou a trava e derrubou painel e robô). O painel responde 503 "banco ocupado" em vez de cair, e o cache do PvP segue sem gravar se o banco estiver travado.
 - **Fim de linha:** `.py` usa LF e `.bat` usa CRLF (`.gitattributes`). No Windows, `Path.write_text` grava CRLF; para `.py`, use `write_bytes` ou `open(..., newline="\n")`.
 - **`pythonw` não tem stdout:** os filhos da bandeja têm a saída redirecionada para arquivos. Não use `print` esperando um console.
 - **Dois mercados no mesmo item:** pedras são vendidas em lote a 2 gemas por unidade e avulsas a dezenas ou centenas de gemas. Sempre filtre outliers (mediana ×/÷ 4) antes de comparar preços.

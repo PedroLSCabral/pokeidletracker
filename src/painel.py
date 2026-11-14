@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import sqlite3
 import statistics
 import sys
 import threading
@@ -560,7 +561,10 @@ class Handler(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         if url.path.startswith("/api/"):
             moeda = q.get("moeda", "gems") if q.get("moeda") in ("gems", "coins") else "gems"
-            con = importer.connect()
+            try:
+                con = importer.connect()
+            except sqlite3.OperationalError as e:
+                return self._json({"erro": f"o banco está ocupado ({e}): tente de novo em alguns segundos"}, 503)
             try:
                 if url.path == "/api/resumo":
                     return self._json(api_resumo(con, moeda))
@@ -642,7 +646,10 @@ class Handler(BaseHTTPRequestHandler):
             corpo = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 65536)) or b"{}")
         except json.JSONDecodeError:
             return self._json({"erro": "json inválido"}, 400)
-        con = importer.connect()
+        try:
+            con = importer.connect()
+        except sqlite3.OperationalError as e:
+            return self._json({"erro": f"o banco está ocupado ({e}): tente de novo em alguns segundos"}, 503)
         try:
             return self._json(fn(con, corpo))
         except (ValueError, TypeError) as e:
