@@ -423,5 +423,13 @@ A soma dos IVs, e o ⚔ que soma os seis stats, esconde um Pokémon "decente em 
 - **Nota dos IVs (0 a 10):** 40% o IV do ataque da espécie, 30% o de SPD e 10% cada HP, DEF e SP.DEF; o ataque que a espécie não usa não conta. O ataque pesa mais porque entra no stat como 2·IV (~+40% de dano de IV 1 a 32 numa espécie de base 100); o SPD vem logo atrás porque muda quantas vezes o Pokémon bate (~1/3 a mais). Um IV de ataque ou SPD abaixo de 11 tira até 40% da nota (IV 1 tira 40%, IV 10 tira 4%), e dois horríveis castigam os dois.
 - **Onde pesa:** no `pvp` e na `ponte`, o indivíduo (40%) virou 15% ⚔ e 25% nota dos IVs; a espécie continua 60%. Na aba PvP, "o mais forte" da loja virou "o melhor": 40% ⚔ e 60% IVs dentro da espécie. A coluna IV da busca mostra a soma e, embaixo, o IV de ataque e o de SPD (em vermelho quando horríveis).
 
+## Vale evoluir para o PvP? (14/11)
+Na análise de um Pokémon (Pokémon > Analisar e precificar), uma caixa diz se vale evoluir para usá-lo no PvP, cruzando com a análise de PvP do seu nick.
+- **O nível pesa pouco no PvP.** O cliente do jogo (`shared/ginasios.mjs`) mostra que o "Poder no PvP" da ficha é o do ginásio, com o nível achatado acima do 150: `150 × (nível/150)^0,45`. Um Nv 300 luta como 205 e um Nv 1000 como 351. Já a evolução troca as bases e dá os golpes de 600 da última forma: é ela que muda a força. O ranqueado pede Nv 150.
+- **Força:** o ⚔ do PvP pela conta do jogo e os duelos 1×1 do comparador do jogo (`compararDuelo1v1`) contra as suas 5 ameaças, no nível em que elas aparecem nas suas partidas, com um rival típico (IV 16, qualidade 1, P1).
+- **Para o seu time:** a mesma nota das sugestões da aba PvP (ganha das ameaças, taxa no meta do rank, encaixe de tipos). A forma de agora quase nunca está no meta (ninguém joga de Charmander), então ela entra só pela força; a espécie final é comparada com o mais fraco do seu time.
+- **Veredito:** "vale" quando fica pelo menos 15% mais forte (ou ganha 8 pontos de chance média nos duelos) e a espécie entra no time; "fica mais forte, mas não entra no seu time" quando só a força melhora. Também mostra o tempo até poder levar ao ranqueado e os anúncios dela já pronta (nota parecida, nível pelo menos o do seu), para comparar com comprar.
+- **Sem nick:** só o meta da faixa high elo, sem duelos.
+
 ## Perguntas em aberto
 - Os nomes no export para as outras raridades devem ser `Uncommon`, `Mythic` e `Legendary` (só vimos `Common` e `Rare`). Isso se confirma quando aparecerem vendas.

@@ -240,9 +240,10 @@ def _buracos(time_tipos: list[list[str]]) -> list[dict]:
     return sorted(out, key=lambda x: (-(x["fracos"] - x["resistem"]), -x["fracos"]))
 
 
-def analisar(con, nick: str, faixa: str = "", orcamento: float | None = None, moeda: str = "gems",
-             limite: int = 30, forcar: bool = False) -> dict:
-    """Com `forcar` ("Atualizar agora"), o seu perfil e o meta do rank são lidos de novo do Tracker."""
+def _contexto(con, nick: str, faixa: str = "", forcar: bool = False) -> dict:
+    """O que a análise de um nick precisa: perfil, meta do rank, time, ameaças, buracos e, pelas páginas das
+    ameaças no Tracker, o quanto cada espécie responde a elas (`resp`). Usado pela aba PvP e pela avaliação
+    de evolução de um Pokémon (`avaliar_evolucao`)."""
     nick = nick.strip()
     if not nick:
         raise ErroPvP("falta o nick")
@@ -271,15 +272,6 @@ def analisar(con, nick: str, faixa: str = "", orcamento: float | None = None, mo
         a["resistem"] = [pk["nome"] for pk in time_ if pk["tipos"] and melhor_ataque(a["tipos"], pk["tipos"]) <= 0.5]
     buracos = _buracos([pk["tipos"] for pk in time_])
 
-    # ---- tipos que mais te castigam (os das ameaças, pelo peso de cada uma)
-    peso_tipo = Counter()
-    for a in ameacas:
-        for t in a["tipos"][:2]:
-            peso_tipo[t] += a["peso"]
-    tot = sum(peso_tipo.values()) or 1
-    tipos_castigam = [{"tipo": t, "nome": NOMES_TIPO.get(t, t), "parte": round(v / tot * 100)}
-                      for t, v in peso_tipo.most_common(4)]
-
     # ---- respostas: quem ganha das suas ameaças no PvP inteiro
     cand: dict[int, dict] = defaultdict(lambda: {"resp": 0.0, "venceu": []})
     peso_total = sum(a["peso"] for a in ameacas) or 1
@@ -300,44 +292,68 @@ def analisar(con, nick: str, faixa: str = "", orcamento: float | None = None, mo
             cand[k]["resp"] += (a["peso"] / peso_total) * (ganha - 0.5) * 2 * confianca
             cand[k]["venceu"].append({"nome": a["nome"], "taxa": round(ganha, 3), "partidas": n})
             cand[k]["nome"] = c["nome"]
+    return {"perfil": perfil, "partidas": partidas, "rank": rank, "faixa": faixa, "meta": meta,
+            "meta_por_id": meta_por_id, "time": time_, "ameacas": ameacas, "tipos": tipos, "buracos": buracos,
+            "cand": cand, "peso_total": peso_total}
+
+
+def _pontuar(ctx: dict, k: int, nome: str, tk: list[str], linha_meta: dict | None = None) -> dict:
+    """A nota de PvP de uma espécie para o seu time (a mesma das sugestões): 45% o quanto ela ganha das suas
+    ameaças, 35% a taxa no meta do rank e 20% o encaixe de tipos."""
+    ameacas, peso_total = ctx["ameacas"], ctx["peso_total"]
+    c = ctx["cand"].get(k) or {"resp": 0.0, "venceu": []}
+    # Encaixe de tipos: resiste aos golpes das ameaças? Bate forte nelas? Tapa os buracos do time?
+    encaixe = 0.0
+    for a in ameacas:
+        if not a["tipos"] or not tk:
+            continue
+        w = a["peso"] / peso_total
+        d = melhor_ataque(a["tipos"], tk)
+        encaixe += w * (1 if d <= 0.5 else -1 if d >= 2 else 0)
+        encaixe += w * (0.5 if melhor_ataque(tk, a["tipos"]) >= 2 else 0)
+    tampa = [b["nome"] for b in ctx["buracos"][:3] if b["fracos"] >= 2 and tk and mult(b["tipo"], tk) <= 0.5]
+    encaixe += 0.15 * len(tampa)
+    m = linha_meta if linha_meta is not None else ctx["meta_por_id"].get(k)
+    nota_meta = _nota_meta(m)
+    pontos = 0.45 * c["resp"] + 0.35 * (nota_meta - 0.5) * 6 + 0.20 * encaixe
+    return {"id": k, "nome": nome, "tipos": tk, "pontos": round(pontos, 3),
+            "respostas": sorted(c["venceu"], key=lambda v: -v["taxa"])[:3], "tampa": tampa,
+            "meta_taxa": round(m["winrate"], 3) if m else None, "meta_partidas": m["partidas"] if m else 0,
+            "resiste_a": [a["nome"] for a in ameacas if a["tipos"] and tk and melhor_ataque(a["tipos"], tk) <= 0.5],
+            "sofre_de": [a["nome"] for a in ameacas if a["tipos"] and tk and melhor_ataque(a["tipos"], tk) >= 2]}
+
+
+def analisar(con, nick: str, faixa: str = "", orcamento: float | None = None, moeda: str = "gems",
+             limite: int = 30, forcar: bool = False) -> dict:
+    """Com `forcar` ("Atualizar agora"), o seu perfil e o meta do rank são lidos de novo do Tracker."""
+    ctx = _contexto(con, nick, faixa, forcar)
+    perfil, partidas, faixa, meta = ctx["perfil"], ctx["partidas"], ctx["faixa"], ctx["meta"]
+    time_, ameacas, cand, tipos = ctx["time"], ctx["ameacas"], ctx["cand"], ctx["tipos"]
+
+    # ---- tipos que mais te castigam (os das ameaças, pelo peso de cada uma)
+    peso_tipo = Counter()
+    for a in ameacas:
+        for t in a["tipos"][:2]:
+            peso_tipo[t] += a["peso"]
+    tot = sum(peso_tipo.values()) or 1
+    tipos_castigam = [{"tipo": t, "nome": NOMES_TIPO.get(t, t), "parte": round(v / tot * 100)}
+                      for t, v in peso_tipo.most_common(4)]
 
     # O meta do rank também entra: as espécies com boa taxa e amostra decente.
-    for k, linha in meta_por_id.items():
+    nomes = {k: c["nome"] for k, c in cand.items() if c.get("nome")}
+    for k, linha in ctx["meta_por_id"].items():
         if linha.get("partidas", 0) >= 200 and _nota_meta(linha) > 0.5:
-            cand[k]["nome"] = linha["nome"]
+            nomes[k] = linha["nome"]
 
     no_time = {pk["id"] for pk in time_}
-    lista = []
-    for k, c in cand.items():
-        if k in no_time or not c.get("nome"):
-            continue
-        tk = tipos.get(k, [])
-        # Encaixe de tipos: resiste aos golpes das ameaças? Bate forte nelas? Tapa os buracos do time?
-        encaixe = 0.0
-        for a in ameacas:
-            if not a["tipos"] or not tk:
-                continue
-            w = a["peso"] / peso_total
-            d = melhor_ataque(a["tipos"], tk)
-            encaixe += w * (1 if d <= 0.5 else -1 if d >= 2 else 0)
-            encaixe += w * (0.5 if melhor_ataque(tk, a["tipos"]) >= 2 else 0)
-        tampa = [b["nome"] for b in buracos[:3] if b["fracos"] >= 2 and tk and mult(b["tipo"], tk) <= 0.5]
-        encaixe += 0.15 * len(tampa)
-        m = meta_por_id.get(k)
-        nota_meta = _nota_meta(m)
-        pontos = 0.45 * c["resp"] + 0.35 * (nota_meta - 0.5) * 6 + 0.20 * encaixe
-        lista.append({"id": k, "nome": c["nome"], "tipos": tk, "pontos": round(pontos, 3),
-                      "respostas": sorted(c["venceu"], key=lambda v: -v["taxa"])[:3], "tampa": tampa,
-                      "meta_taxa": round(m["winrate"], 3) if m else None, "meta_partidas": m["partidas"] if m else 0,
-                      "resiste_a": [a["nome"] for a in ameacas if a["tipos"] and tk and melhor_ataque(a["tipos"], tk) <= 0.5],
-                      "sofre_de": [a["nome"] for a in ameacas if a["tipos"] and tk and melhor_ataque(a["tipos"], tk) >= 2]})
+    lista = [_pontuar(ctx, k, nome, tipos.get(k, [])) for k, nome in nomes.items() if k not in no_time]
     lista.sort(key=lambda x: -x["pontos"])
     sugestoes = lista[:limite]
     if orcamento:
         _anuncios(con, sugestoes, orcamento, moeda)
 
-    return {"nick": perfil.get("jogador", {}).get("nick", nick), "faixa": faixa, "rank": rank,
-            "totais": perfil.get("totais") or {}, "time": time_, "ameacas": ameacas, "buracos": buracos[:6],
+    return {"nick": perfil.get("jogador", {}).get("nick", nick.strip()), "faixa": faixa, "rank": ctx["rank"],
+            "totais": perfil.get("totais") or {}, "time": time_, "ameacas": ameacas, "buracos": ctx["buracos"][:6],
             "tipos_castigam": tipos_castigam, "sugestoes": sugestoes, "meta": _resumo_meta(con, meta, faixa),
             "partidas_recentes": len(partidas),
             "vitorias_recentes": sum(1 for p in partidas if p.get("venci")),

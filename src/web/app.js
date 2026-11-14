@@ -1515,6 +1515,7 @@ async function analisarEvolucao(e, anuncio = null) {
     $$('[data-pkeiv]').forEach((i) => { i.value = d.ivs[i.dataset.pkeiv] ?? ''; });
   }
   desenharEvolucao(d);
+  carregarPvpEvolucao(p);
 }
 // A ficha da forma final no mesmo modelo que o jogo copia (e que `lerFichaJogo` lê de volta).
 const BANDAS_QUALIDADE = [[0.8, 0.9, 5], [0.9, 1.0, 5], [1.0, 1.1, 34.03846], [1.1, 1.2, 20], [1.2, 1.3, 10], [1.3, 1.4, 10],
@@ -1679,6 +1680,7 @@ function desenharEvolucao(d) {
     h += `<div class="caixa pkv"><h4 class="pke-tit">Preço de venda agora</h4>${htmlPrecosVenda(pr.agora, pr)}</div>`;
     h += pr.avisos.map((x) => `<p class="aviso">⚠ ${esc(x)}</p>`).join('');
   }
+  h += '<div class="caixa pkv" id="pke-pvp"></div>';
   if (d.ja_e_final) {
     h += '<div class="vazio">Este já é a última forma: não há evolução para simular.</div>';
     if (pr && pr.subir) {
@@ -1715,6 +1717,82 @@ function desenharEvolucao(d) {
     </div>`;
   }
   $('#pke-corpo').innerHTML = h;
+}
+// ------ vale evoluir para o PvP? (analise/arena.py): ⚔ do PvP, nota para o seu time e duelos contra as suas ameaças
+const VEREDITO_PVP = {
+  vale: ['margem-pos', 'Vale evoluir para o PvP'],
+  melhora_fora: ['', 'Fica mais forte, mas não entra no seu time'],
+  igual: ['', 'Evoluir quase não muda no PvP'],
+  nao: ['margem-neg', 'Não vale evoluir para o PvP'],
+};
+let pedidoPvpEvol = 0;
+async function carregarPvpEvolucao(p, forcar = false) {
+  const caixa = $('#pke-pvp');
+  if (!caixa) return;
+  const nick = lerLocal('pvp_nick');
+  const meu = ++pedidoPvpEvol;
+  caixa.innerHTML = `<h4 class="pke-tit">Vale evoluir para o PvP?</h4><p class="aviso">lendo o Tracker do jogo${nick ? ` para ${esc(nick)}` : ''}… (a primeira vez leva uns 30 s)</p>`;
+  let d;
+  try {
+    d = await api('/api/pk/evolucao/pvp', { ...p, nick, forcar: forcar ? 1 : '' });
+  } catch (err) {
+    if (meu === pedidoPvpEvol) caixa.innerHTML = `<h4 class="pke-tit">Vale evoluir para o PvP?</h4><p class="aviso">Não deu: ${esc(err.message)}</p>`;
+    return;
+  }
+  if (meu !== pedidoPvpEvol || !$('#pke-pvp')) return;
+  $('#pke-pvp').innerHTML = htmlPvpEvolucao(d);
+  $('#pke-pvp-forcar')?.addEventListener('click', () => carregarPvpEvolucao(p, true));
+}
+function htmlPvpEvolucao(d) {
+  const temNick = !!d.nick;
+  const duelosTxt = (x) => (x.duelos.length ? `${x.duelos.filter((u) => u.chance >= 0.5).length} de ${x.duelos.length}` : '—');
+  const tituloDuelos = (x) => x.duelos.map((u) => `${u.nome} Nv ${u.nivel}: ${pct(u.chance)}`).join('\n');
+  const notaTxt = (n) => `<span class="${n.pontos > 0.05 ? 'margem-pos' : n.pontos < -0.05 ? 'margem-neg' : ''}">${n.pontos > 0 ? '+' : ''}${nf(2).format(n.pontos)}</span>`;
+  const metaTxt = (n) => (n.meta_taxa == null ? '<span class="aviso">pouco jogado</span>' : `${pct(n.meta_taxa)} <span class="aviso">(${nf(0).format(n.meta_partidas)} part.${n.meta_posicao ? `, ${n.meta_posicao}º em uso` : ''})</span>`);
+  const pronto = (f) => {
+    if (!f.prontos) return '<span class="aviso">nenhum</span>';
+    const g = f.prontos.moedas.gems;
+    const c = f.prontos.moedas.coins;
+    return [g ? `${htmlPreco(g.menor, 'gems')} <span class="aviso">(${g.anuncios})</span>` : '', c ? `${fmtNum(c.menor, 'coins')} coins <span class="aviso">(${c.anuncios})</span>` : ''].filter(Boolean).join('<br>');
+  };
+  const veredito = (f) => (f.veredito === 'melhora_fora' && !temNick ? ['', 'Fica mais forte, mas a espécie vai mal no meta'] : VEREDITO_PVP[f.veredito]);
+  const linha = (x, f) => `<tr${f && d.melhor !== null && d.finais[d.melhor] === f ? ' class="pkv-melhor"' : ''}>
+      <td>${esc(x.nome)} ${tagsTipo(x.tipos)}${x.no_time ? ' <span class="tag">no seu time</span>' : ''}</td>
+      <td class="num" title="O ⚔ que a ficha do jogo chama de Poder no PvP, no nível de arena ${x.nivel_arena} (Nv ${x.nivel_pvp})">${nf(0).format(x.poder_pvp)}${f ? ` <span class="aviso">${nf(1).format(f.ganho_poder)}×</span>` : ''}</td>
+      <td class="num" title="A mesma nota das sugestões da aba PvP: 45% ganha das suas ameaças, 35% a taxa no meta do rank, 20% o encaixe de tipos">${notaTxt(x.nota)}</td>
+      <td class="num">${metaTxt(x.nota)}</td>
+      ${temNick ? `<td class="num" title="${esc(tituloDuelos(x))}">${duelosTxt(x)}</td>` : ''}
+      <td class="num">${f ? (f.horas_ate_pvp ? fmtHoras(f.horas_ate_pvp) : 'já') : (x.nivel < d.nivel_min ? `<span class="aviso">precisa do Nv ${d.nivel_min}</span>` : '—')}</td>
+      <td class="num">${f ? pronto(f) : ''}</td>
+      <td>${f ? `<span class="${veredito(f)[0]}">${veredito(f)[1]}</span>` : '<span class="aviso">agora</span>'}</td>
+    </tr>`;
+  let titulo;
+  const m = d.melhor !== null ? d.finais[d.melhor] : null;
+  if (!m) {
+    const a = d.atual;
+    const p = d.pior_do_time;
+    const time = a.no_time ? ' Ele já está no seu time.'
+      : p ? (a.nota.pontos >= p.pontos ? ` <span class="margem-pos">Para o seu time, a espécie tem nota maior que ${esc(p.nome)}, o mais fraco dele.</span>` : ` Para o seu time, a espécie fica abaixo de ${esc(p.nome)}, o mais fraco dele.`) : '';
+    titulo = `${esc(a.nome)} já é a última forma: ⚔ ${nf(0).format(a.poder_pvp)} no PvP${a.nivel < d.nivel_min ? ` quando chegar ao Nv ${d.nivel_min}` : ''}${a.duelos.length ? `, ganha de ${duelosTxt(a)} das suas ameaças nos duelos` : ''}.${time}`;
+  } else {
+    const [cls, txt] = veredito(m);
+    const porque = [];
+    porque.push(`${nf(1).format(m.ganho_poder)}× o ⚔ do PvP de agora`);
+    if (m.duelos.length) porque.push(`ganha de ${duelosTxt(m)} das suas ameaças nos duelos (agora: ${duelosTxt(d.atual)})`);
+    if (m.no_time) porque.push(`${esc(m.nome)} já está no seu time`);
+    else if (d.pior_do_time) porque.push(m.entra ? `para o seu time, ${esc(m.nome)} tem nota maior que ${esc(d.pior_do_time.nome)}, o mais fraco dele` : `para o seu time, ${esc(m.nome)} fica abaixo de ${esc(d.pior_do_time.nome)}, o mais fraco dele`);
+    else if (!temNick) porque.push(m.entra ? 'a espécie vai bem no meta' : 'a espécie perde mais do que ganha no meta');
+    titulo = `<span class="${cls}">${d.finais.length > 1 ? `Melhor caminho: ${esc(m.nome)}. ` : ''}${txt}.</span> ${porque.join('; ')}.`;
+  }
+  const cab = `<tr><th>Forma</th><th class="num" title="Poder no PvP (o do ginásio): acima do Nv 150 o nível é achatado">⚔ PvP</th><th class="num">${temNick ? 'Nota p/ o time' : 'Nota no meta'}</th><th class="num">Taxa no meta</th>${temNick ? '<th class="num" title="Duelos 1×1 do comparador do jogo contra as suas 5 ameaças, no nível em que elas aparecem nas suas partidas">Duelos</th>' : ''}<th class="num">Tempo até o PvP</th><th class="num" title="Anúncios ativos da forma final, mesma condição de shiny, nível pelo menos o do seu no PvP (mínimo 150) e nota parecida (até 0,05 abaixo da projetada): o menor preço e quantos">Pronto na loja</th><th>Veredito</th></tr>`;
+  const time = d.time.length ? `Seu time: ${d.time.map((t) => `${esc(t.nome)} <span class="aviso">(${t.pontos > 0 ? '+' : ''}${nf(2).format(t.pontos)})</span>`).join(', ')}.` : '';
+  const rivais = d.ameacas.length ? ` Duelos contra ${d.ameacas.map((a) => `${esc(a.nome)} Nv ${nf(0).format(a.nivel)}`).join(', ')} (rival típico: IV 16, qualidade 1, P1).` : '';
+  const quem = temNick ? `Para <b>${esc(d.nick)}</b> (${esc(d.rank || NOME_FAIXA[d.faixa] || d.faixa)}, meta de ${esc(NOME_FAIXA[d.faixa] || d.faixa)}).`
+    : `Sem nick salvo: só o meta de ${esc(NOME_FAIXA[d.faixa] || d.faixa)}. Analise o seu nick uma vez na sub-aba PvP para cruzar com o seu time e as suas ameaças.`;
+  return `<h4 class="pke-tit">Vale evoluir para o PvP? <button type="button" class="chip pke-btn" id="pke-pvp-forcar" title="Relê o seu perfil e o meta no Tracker">Atualizar</button></h4>
+    <p style="margin:4px 0">${titulo}</p>
+    <div class="tabela-wrap"><table class="tabela">${cab}${linha(d.atual, null)}${d.finais.map((f) => linha(f, f)).join('')}</table></div>
+    <p class="aviso" style="margin:4px 0 0">${quem} ${time}${rivais} No PvP o nível acima do 150 é achatado (Nv ${d.nivel_rivais ? `${nf(0).format(d.nivel_rivais)} luta como ${nf(0).format(d.nivel_arena_rivais)}` : '300 luta como 205'}), então evoluir pesa mais que subir. O ranqueado pede Nv ${d.nivel_min}.${d.velho ? ' <span class="margem-neg">O Tracker não respondeu: dados da última leitura.</span>' : ''}</p>`;
 }
 function ligarEvolucao() {
   $('#pke-treinador').value = lerLocal('pk_treinador');

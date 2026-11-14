@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import caminhos  # noqa: E402
 import notificar  # noqa: E402
 from analise import pokemon as analise_pokemon  # noqa: E402
-from analise import caca, evolucao, precificar, pvp, sinais, venda  # noqa: E402
+from analise import arena, caca, evolucao, precificar, pvp, sinais, venda  # noqa: E402
 from coleta import coletor, importer  # noqa: E402
 
 HOST, PORT = "127.0.0.1", 8770
@@ -472,31 +472,37 @@ def post_testar(con, b: dict) -> dict:
     return {"ok": bool(ok) and not erros, "canais": ok, "erros": erros}
 
 
+def _ficha_evolucao(con, q: dict, m) -> dict:
+    """A ficha de um Pokémon para a análise: de um anúncio da loja (`anuncio`) ou da ficha digitada/colada."""
+    num = lambda k, d=0.0: float(q[k]) if q.get(k, "").strip() else d  # noqa: E731
+    if q.get("anuncio", "").strip():
+        return evolucao.ficha_do_anuncio(con, int(num("anuncio")))
+    sid = evolucao.especie_por_nome(m, (q.get("especie_id") or q.get("especie", ""))[:40])
+    if not sid:
+        raise ValueError("escolha uma espécie da lista")
+    if not 1 <= num("nivel") <= 1_000_000:
+        raise ValueError("informe o nível do Pokémon")
+    ficha = {"species_id": sid, "nivel": int(num("nivel")), "qualidade": num("qualidade", 1.0),
+             "potencia": int(num("potencia", 1)), "shiny": q.get("shiny") == "1",
+             "ivs": {k: int(num(k, 1)) for k in evolucao.STATS}}
+    # Da ficha copiada do jogo: os stats reais (já com lendário e refino), a nota e o poder dele.
+    stats = {k: int(num("st_" + k)) for k in evolucao.STATS if num("st_" + k) > 0}
+    if len(stats) == len(evolucao.STATS):
+        ficha["stats"] = stats
+    if q.get("nota", "").strip():
+        ficha["nota"] = num("nota")
+    if q.get("poder", "").strip():
+        ficha["poder"] = int(num("poder"))
+    if q.get("refino") == "1":
+        ficha["refino"] = 1
+    return ficha
+
+
 def api_evolucao(con, q: dict) -> dict:
     """Análise de um Pokémon só, com a evolução final: de um anúncio da loja (`anuncio`) ou da ficha digitada."""
     num = lambda k, d=0.0: float(q[k]) if q.get(k, "").strip() else d  # noqa: E731
     m = caca.motor()
-    if q.get("anuncio", "").strip():
-        ficha = evolucao.ficha_do_anuncio(con, int(num("anuncio")))
-    else:
-        sid = evolucao.especie_por_nome(m, (q.get("especie_id") or q.get("especie", ""))[:40])
-        if not sid:
-            raise ValueError("escolha uma espécie da lista")
-        if not 1 <= num("nivel") <= 1_000_000:
-            raise ValueError("informe o nível do Pokémon")
-        ficha = {"species_id": sid, "nivel": int(num("nivel")), "qualidade": num("qualidade", 1.0),
-                 "potencia": int(num("potencia", 1)), "shiny": q.get("shiny") == "1",
-                 "ivs": {k: int(num(k, 1)) for k in evolucao.STATS}}
-        # Da ficha copiada do jogo: os stats reais (já com lendário e refino), a nota e o poder dele.
-        stats = {k: int(num("st_" + k)) for k in evolucao.STATS if num("st_" + k) > 0}
-        if len(stats) == len(evolucao.STATS):
-            ficha["stats"] = stats
-        if q.get("nota", "").strip():
-            ficha["nota"] = num("nota")
-        if q.get("poder", "").strip():
-            ficha["poder"] = int(num("poder"))
-        if q.get("refino") == "1":
-            ficha["refino"] = 1
+    ficha = _ficha_evolucao(con, q, m)
     alvo = int(num("alvo")) or None
     treinador = int(num("treinador")) or None
     comps = analise_pokemon.comparaveis(con)
@@ -510,6 +516,16 @@ def api_evolucao(con, q: dict) -> dict:
     valor_hora = num("valor_hora") if q.get("valor_hora", "").strip() else None
     r["precificacao"] = precificar.precificar(con, comps, r, ficha, valor_hora)
     return r | {"anuncio": ficha.get("anuncio")}
+
+
+def api_evolucao_pvp(con, q: dict) -> dict:
+    """Vale evoluir este Pokémon para o PvP? A mesma ficha de `/api/pk/evolucao`, mais `nick` e `faixa`."""
+    m = caca.motor()
+    ficha = _ficha_evolucao(con, q, m)
+    treinador = int(float(q.get("treinador") or 0)) or None
+    # Até o Nv 150 (o mínimo do ranqueado), para saber o tempo até poder levar a forma final ao PvP.
+    r = evolucao.analisar(ficha, treinador, arena.NIVEL_MIN_PVP if ficha["nivel"] < arena.NIVEL_MIN_PVP else None, None, m)
+    return arena.avaliar(con, r, q.get("nick", "")[:20], q.get("faixa", "")[:12], q.get("forcar") == "1", m)
 
 
 def api_status(con) -> dict:
@@ -587,6 +603,8 @@ class Handler(BaseHTTPRequestHandler):
                         | {"objetivos": analise_pokemon.OBJETIVOS, "aviso_pvp": extra.get("aviso_pvp")})
                 if url.path == "/api/pk/especies":
                     return self._json({"especies": evolucao.especies()})
+                if url.path == "/api/pk/evolucao/pvp":
+                    return self._json(api_evolucao_pvp(con, q))
                 if url.path == "/api/pk/evolucao":
                     return self._json(api_evolucao(con, q))
                 if url.path == "/api/pvp":
