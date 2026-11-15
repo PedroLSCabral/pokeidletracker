@@ -310,8 +310,17 @@ def tarefas_locais(con) -> None:
         threading.Thread(target=_baixar_catalogo, name="catalogo-jogo", daemon=True).start()
 
 
+def _baixar_ritmo() -> None:
+    """O tempo por abate de cada hunt (da calculadora, 1 arquivo). Falhou, fica o de ontem ou a mediana."""
+    try:
+        log(f"caça: ritmo das hunts atualizado ({caca.baixar_ritmo()} hunts)")
+    except Exception as e:
+        log(f"caça: ritmo das hunts falhou (fica o anterior): {e!r}")
+
+
 def _baixar_catalogo() -> None:
-    """Em segundo plano: 5 arquivos públicos (~4 MB) com 1 s entre eles, uma vez por dia."""
+    """Em segundo plano: os arquivos públicos (~4 MB) com 1 s entre eles, uma vez por dia, e o ritmo das hunts."""
+    _baixar_ritmo()
     try:
         log(f"caça: catálogo do jogo atualizado ({caca.baixar_catalogo()} espécies)")
     except Exception as e:

@@ -21,6 +21,7 @@ AGORA_ROBO = DADOS / "robo_agora.json"  # o que o robô está fazendo agora (lid
 JOGO = DADOS / "jogo"                  # dados do jogo para a conta de XP/h (analise/caca.py)
 CATALOGO_JOGO = JOGO / "catalogo.json"     # espécies, stats-base e golpes (dos assets públicos, 1 vez por dia)
 WELCOME_JOGO = JOGO / "welcome-dados.json"  # hunts e constantes de caça, tirados do welcome a cada login
+RITMO_JOGO = JOGO / "ritmo.json"            # segundos por abate de cada hunt (simulador do jogo, pela calculadora)
 
 # Página do painel (HTML/CSS/JS servidos pelo painel.py).
 WEB = SRC / "web"

@@ -1,33 +1,39 @@
 """XP por hora de caça de um Pokémon, rápido o bastante para ordenar a loja.
 
-Uma calculadora da comunidade simula a caça golpe a golpe, nível a nível, nas 1.043 hunts: segundos por
-Pokémon. A busca precisa de centenas em cerca de um segundo, então aqui a conta tem três atalhos (~5 ms
-por Pokémon, e a mesma hunt e o mesmo número que a busca completa em 300 casos de teste):
+A referência é a calculadora "Onde caçar?" do pokeidleguide.io (aba #hunt), que simula o Pokémon golpe a golpe
+em cada uma das 1.043 hunts: ~2 s por Pokémon. A conta de cada hunt aqui é a mesma dela, número por número
+(conferido em 11/2026: Abomasnow Nv 1176 → 75.127.258 XP/h no Gible; Furious Scizor Nv 1240 → 95.965.537
+no Shiftry, iguais aos dela). A busca precisa de centenas em cerca de um segundo, então há dois atalhos:
 
-1. **Só o nível de agora.** Na busca a pergunta é "quanto XP/h ele faz hoje", não a trilha até um nível.
-2. **Estimativa antes de simular** (`_estimar`). Para cada hunt liberada, uma conta de 1º grau pela média
+1. **Estimativa antes de simular** (`_estimar`). Para cada hunt liberada, uma conta de 1º grau pela média
    de longo prazo: cada golpe sai uma vez por recarga (que corre também na caminhada entre abates) e a
    Investida a cada 2 s de luta. As hunts são vistas da mais alta para a mais baixa, e a busca para quando
-   nem o teto de uma hunt (3600 ÷ tempo do mapa × XP do abate) alcança as melhores estimativas.
-3. **Mini-luta só nas 8 melhores estimativas** (`_hunt`): 16 rolagens de HP do selvagem; a cada intervalo,
-   o golpe pronto de maior dano, senão a Investida; os trechos só de Investida são saltados de uma vez.
+   nem o teto de uma hunt (3600 ÷ tempo do mapa mais rápido × XP do abate) alcança as melhores estimativas.
+2. **A luta só nas melhores estimativas** (`_hunt`, `CANDIDATAS`): 32 abates (IV de HP do selvagem de 1 a
+   32); a cada intervalo, o golpe pronto de maior dano, senão a Investida; os trechos só de Investida são
+   saltados de uma vez (dá o mesmo que ir de golpe em golpe).
 
 As regras vêm dos módulos públicos do jogo (`shared/*.mjs`, ver docs/ARQUITETURA.md, seção 14.1):
 - dano = ((2·nível/5 + 2) · poder · ATK/DEF) / 50 + 2, × STAB 1,5 × efetividade × 0,925 (rolagem média);
   na caça a efetividade é ampliada (`ampliacaoHunt`, 1,5): 2× vira 2,5× e 0,5× vira 0,33×;
-- os golpes: os do catálogo, trocados pelos das planilhas de balanceamento (`golpes-planilhas.mjs`), mais
-  os de assinatura (poder 600, recarga 60 s) que o jogo dá às últimas evoluções; megas com o golpe de mega;
+- os golpes: os do catálogo, trocados pelos das planilhas de balanceamento (`golpes-planilhas.mjs`), a
+  Outland com a planilha dela ou os golpes da espécie nacional do nome, Orre com os da nacional, mais os de
+  assinatura (poder 600, recarga 60 s) que o jogo dá às últimas evoluções; megas com o golpe de mega;
 - selvagem: stats = (base + 2·IV) · nível/100, IV médio 16; HP de combate = máx(24, HP·12) × 5;
   dano dele × 1,8; um golpe a cada 1,4 s;
 - XP do abate = ⌊0,6·n²⌋ + 8 até o nível 150; acima, 13.500 · (n/150)^1,25;
 - Investida: poder 30, físico, recarga 2 s; intervalo entre golpes 0,9 s; os dois −10 ms por IV de SPD;
   a recarga dos golpes cai até 7% com o SPD-base e o IV de SPD;
-- com poção automática só morre quem leva, de um golpe, mais que o HP inteiro.
+- ritmo: quem mata de um golpe leva o tempo do mapa da hunt (3,05 a 3,76 s por abate, do simulador do jogo,
+  pela tabela da calculadora, `baixar_ritmo`). Quem luta mais anda menos (o bando vem até ele) e, andando
+  menos, tem menos recarga para a luta: as duas coisas se acertam num ponto fixo (`tempo_morto`);
+- com poção automática só morre quem leva, de um golpe, mais que o HP inteiro (e, como na calculadora,
+  conta uma morte a cada 999 abates para os outros).
 
-Ficam de fora AoE, TM, bike, casa, bônus de XP, dia sazonal e o tempo de cada mapa (usa a mediana). Contra a
-calculadora, na mesma hunt, o XP/h fica entre −15% e +17%. Os dados: o catálogo de espécies e golpes sai
-dos arquivos públicos do jogo (`baixar_catalogo`, 1 vez por dia, pelo robô); as hunts e as constantes saem
-do `welcome` que o robô já recebe ao entrar (`guardar_welcome`).
+Ficam de fora, como na calculadora sem opções: AoE, TM, bike, casa, bônus de XP e dia sazonal. Os dados: o
+catálogo de espécies e golpes sai dos arquivos públicos do jogo (`baixar_catalogo`, 1 vez por dia, pelo
+robô); as hunts e as constantes saem do `welcome` que o robô já recebe ao entrar (`guardar_welcome`); o
+ritmo por hunt, da calculadora (1 arquivo por dia). Sem o ritmo, toda hunt usa a mediana dos mapas.
 """
 from __future__ import annotations
 
@@ -62,17 +68,20 @@ S_POR_IV_SPD = 0.010
 PODER_MINIMO = 15
 HP_COMBATE_MULT, HP_COMBATE_MIN = 12, 24
 IV_SELVAGEM = 16
-IVS_HP_AMOSTRA = tuple(range(1, 33, 2))
-# Ritmo: tempo por abate de quem mata de um golpe (mediana dos mapas no simulador do jogo 1.409) e o
-# quanto a luta encurta a caminhada até o próximo bando (telemetria publicada pela calculadora).
+IVS_HP_AMOSTRA = tuple(range(1, 33))   # um abate de cada IV de HP do selvagem (1 a 32), como a calculadora
+# Ritmo: tempo por abate de quem mata de um golpe. Vem do mapa de cada hunt (o simulador do jogo, pela tabela
+# que a calculadora publica, `baixar_ritmo`); sem a tabela, a mediana dos mapas no simulador do jogo 1.409.
+# E o quanto a luta encurta a caminhada até o próximo bando (telemetria publicada pela calculadora).
 S_POR_ABATE_MAPA = 3.41
+URL_RITMO = "https://pokeidleguide.io/data/jogo/ritmo-do-jogo.json"
 CAMINHADA_DO_MAPA, CAMINHADA_PISO_S, CAMINHADA_TAU_S = 0.83, 1.41, 2.8
 MORTE_S = 3 + 20.6 * 0.51           # volta ao jogo + corrida de volta
+ABATES_POR_VIDA_MAX = 999           # quem não morre de um golpe: a calculadora conta uma morte a cada 999 abates
 # "Não mata" para a conta. Precisa ser folgado: abaixo do nível 150 o XP do abate cresce com o quadrado do
 # nível do selvagem, e um Pokémon fraco faz mais XP/h numa hunt alta de luta longa (30 s por abate) do que
 # numa baixa de um golpe só.
-MAX_GOLPES_POR_ABATE = 400
-MAX_LUTA_S = 300                    # o mesmo limite, pela conta fechada (antes de simular)
+MAX_GOLPES_POR_ABATE = 4000
+MAX_LUTA_S = 3000                   # o mesmo limite, pela conta fechada (antes de simular)
 CANDIDATAS = 8                      # hunts que passam da estimativa para a mini-luta
 EF_MAXIMA = 5.5                     # 4× (dupla vantagem) ampliado pela caça: 1 + 3 × 1,5
 PADRAO_CONSTS = {"ampliacaoHunt": 1.5, "multHpSelvagem": 5, "multDanoSelvagem": 1.8}
@@ -164,6 +173,25 @@ TIPOS_ELEMENTO = ("NORMAL", "FIRE", "WATER", "GRASS", "ELECTRIC", "ICE", "FIGHTI
 GOLPE_600_CD_MS = 60_000
 GOLPE_MEGA_CD_MS = 30_000
 FANTASMA_OUTLAND = range(10_000, 10_501)   # espelhos fantasmas da Outland: não ganham golpe especial
+OUTLAND = range(2001, 2059)                # a Outland com os ids novos (shared/outland.mjs)
+OUTLAND_LEGADO, OUTLAND_DESLOCA = range(10_501, 10_548), 10_501 - 2001   # ids antigos → novos
+ORRE = range(13_000, 14_000)               # clones de Orre: os golpes são os da espécie nacional (id − 13000)
+MODULOS_CATALOGO = ("ajustes-especie-espelho.mjs", "outland-sprite-dex.mjs")
+
+
+def ler_ajustes_tipos(js: str) -> dict:
+    """`AJUSTE_TIPOS` de shared/ajustes-especie-espelho.mjs: pokeId → [tipo1, tipo2] (o Lucario veio trocado)."""
+    m = re.search(r"AJUSTE_TIPOS = \{(.*?)\};", js, re.S)
+    return {int(pid): [t1] + ([t2] if t2 else [])
+            for pid, t1, t2 in re.findall(r"(\d+):\s*\['(\w+)'(?:\s*,\s*'(\w+)')?\]", m.group(1) if m else "")}
+
+
+def ler_dex_outland(js: str) -> tuple[list[str], dict]:
+    """shared/outland-sprite-dex.mjs: (prefixos dos nomes da Outland, nome da espécie base → dex dela)."""
+    m = re.search(r"PREFIXOS_OUTLAND = \[(.*?)\];", js, re.S)
+    prefixos = re.findall(r"'([^']*)'", m.group(1)) if m else []
+    m = re.search(r"DEX_POR_NOME = new Map\(\[(.*?)\]\);", js, re.S)
+    return prefixos, {n: int(d) for n, d in re.findall(r"\['([^']+)',\s*(\d+)\]", m.group(1) if m else "")}
 
 
 def injetar_golpes_600(c: dict) -> None:
@@ -205,9 +233,10 @@ _RE_ESPECIE = re.compile(r"^\s*(\d+):\s*\[(.*?)^\s*\],", re.M | re.S)
 _RE_GOLPE = re.compile(r"\[\s*(['\"])(.*?)\1\s*,\s*'(\w+)'\s*,\s*'(\w+)'\s*,\s*(\d+)\s*(?:,\s*(\w+)\s*)?\]")
 
 
-def ler_planilhas(js: str) -> tuple[list[dict], set, dict]:
+def ler_planilhas(js: str) -> tuple[list[dict], set, dict, dict, set]:
     """Lê shared/golpes-planilhas.mjs: (tabelas na ordem em que o jogo aplica, ids das tabelas "fechadas",
-    golpes das megas por pokeId da mega). Cada golpe: {power, type, category, cooldownMs, learnLevel...}."""
+    golpes das megas por pokeId da mega, golpes próprios da Outland por pokeId, ids da Outland "fechados").
+    Cada golpe: {power, type, category, cooldownMs, learnLevel...}."""
     tabelas = {}
     # Um pedaço por declaração (de um `const X = ` até o próximo): uma tabela vazia `{};` não engole a seguinte.
     decl = list(_RE_DECLARACAO.finditer(js))
@@ -236,11 +265,18 @@ def ler_planilhas(js: str) -> tuple[list[dict], set, dict]:
 
     ordem = [tabelas[n] for n in nomes(r"^const TABELAS = \[(.*?)\];") if n in tabelas]
     fechadas = {pid for n in nomes(r"^const TABELAS_FECHADAS = new Set\(\[(.*?)\]\);") for pid in tabelas.get(n, {})}
-    megas: dict = {}
-    for n in nomes(r"export function golpesDaPlanilhaDaMega\(pokeId\) \{(.*?)return"):  # a 1ª tabela que tem vence
-        for pid, golpes in tabelas.get(n, {}).items():
-            megas.setdefault(pid, golpes)
-    return ordem, fechadas, megas
+    def primeira_que_tem(funcao):     # `A[id] ?? B[id] ?? ...`: a 1ª tabela que tem vence
+        d: dict = {}
+        for n in nomes(r"export function " + funcao + r"\(pokeId\) \{(.*?)return"):
+            for pid, golpes in tabelas.get(n, {}).items():
+                d.setdefault(pid, golpes)
+        return d
+
+    megas = primeira_que_tem("golpesDaPlanilhaDaMega")
+    outland = primeira_que_tem("golpesDaPlanilhaDoOutland")
+    outland_fechados = {pid for n in nomes(r"export function golpesDoOutlandFechados\(pokeId\) \{(.*?)^\}")
+                        for pid in tabelas.get(n, {})}
+    return ordem, fechadas, megas, outland, outland_fechados
 
 
 def baixar_catalogo() -> int:
@@ -253,6 +289,9 @@ def baixar_catalogo() -> int:
     outland: set[int] = set()
     for nome in CATALOGOS:
         for c in (_baixar(nome) or {}).get("creatures") or []:
+            for k in ("pokeId", "evolvesToId"):    # a Outland com os ids antigos (aplicarRemapOutlandLista)
+                if isinstance(c.get(k), int) and c[k] in OUTLAND_LEGADO:
+                    c[k] -= OUTLAND_DESLOCA
             especies.setdefault(int(c["pokeId"]), c)
             if "outland" in nome:
                 outland.add(int(c["pokeId"]))
@@ -267,13 +306,50 @@ def baixar_catalogo() -> int:
                 c[k] = o[k]
         if isinstance(o.get("attacks"), list):
             c["attacks"] = o["attacks"]
+    # Os módulos que acertam tipos e a Outland. Se falharem, o catálogo sai sem esses acertos (só o Lucario e
+    # a Outland mudam).
+    try:
+        time.sleep(1)
+        ajustes_tipos = ler_ajustes_tipos(_baixar_texto(URL_SHARED + MODULOS_CATALOGO[0]))
+        time.sleep(1)
+        prefixos_outland, dex_outland = ler_dex_outland(_baixar_texto(URL_SHARED + MODULOS_CATALOGO[1]))
+    except Exception as e:  # noqa: BLE001
+        print(f"catálogo: sem os acertos de tipos e da Outland ({e!r})", flush=True)
+        ajustes_tipos, prefixos_outland, dex_outland = {}, [], {}
+    for pid, tipos in ajustes_tipos.items():        # aplicarAjustesTipos, antes de tudo que lê o tipo
+        if pid in especies:
+            especies[pid]["type1"], especies[pid]["type2"] = tipos[0], (tipos[1:] or [None])[0]
     # Os golpes das planilhas de balanceamento substituem os do catálogo (aplicarGolpesDasPlanilhas do jogo).
-    ordem, fechadas, megas = ler_planilhas(_baixar_texto(URL_PLANILHAS))
+    ordem, fechadas, megas, golpes_outland, outland_fechados = ler_planilhas(_baixar_texto(URL_PLANILHAS))
     for tabela in ordem:
         for pid, golpes in tabela.items():
             if pid in especies:
                 especies[pid]["attacks"] = [dict(g) for g in golpes]
                 especies[pid]["golpesFechados"] = pid in fechadas
+    # A Outland (herdarBaseOutland): os golpes da planilha dela, se tem; os stats-base e, sem planilha, os
+    # golpes vêm da espécie nacional do nome ("Furious Scizor" → Scizor).
+    for pid in OUTLAND:
+        c = especies.get(pid)
+        if not c:
+            continue
+        proprios = golpes_outland.get(pid)
+        if proprios:
+            c["attacks"] = [dict(g) for g in proprios]
+        if pid in outland_fechados:
+            c["golpesFechados"] = True
+        nome = str(c.get("name") or "").strip()
+        for pre in prefixos_outland:
+            if nome.startswith(pre):
+                nome = nome[len(pre):]
+                break
+        base = especies.get(dex_outland.get(nome.lower(), -1))
+        if not base:
+            continue
+        for k in ("baseHp", "baseAtk", "baseDef", "baseSpAtk", "baseSpDef", "baseSpeed"):
+            if isinstance(base.get(k), (int, float)):
+                c[k] = base[k]
+        if not proprios and isinstance(base.get("attacks"), list):
+            c["attacks"] = [dict(a) for a in base["attacks"]]
     # A árvore de evolução, montada como o cliente monta (analise/evolucao.py). Se os módulos falharem, o
     # catálogo sai do mesmo jeito, só sem as evoluções (a análise de evolução avisa).
     from analise import evolucao
@@ -295,6 +371,10 @@ def baixar_catalogo() -> int:
         evolucao.arvore_antes_dos_golpes(especies, tabelas)
     for c in especies.values():
         injetar_golpes_600(c)
+    for pid in ORRE:                                # herdarGolpesOrre: depois dos golpes de 600 da nacional
+        c, base = especies.get(pid), especies.get(pid - ORRE.start)
+        if c and base and isinstance(base.get("attacks"), list):
+            c["attacks"] = [dict(a) for a in base["attacks"]]
     if tabelas:
         evolucao.arvore_depois_dos_golpes(especies, tabelas, outland)
     saida = {}
@@ -323,6 +403,25 @@ def baixar_catalogo() -> int:
     return len(saida)
 
 
+def baixar_ritmo() -> int:
+    """O tempo por abate de quem mata de um golpe, hunt a hunt, que a calculadora (pokeidleguide.io) tira do
+    simulador do próprio jogo (é do mapa: as hunts de um mapa têm os mesmos pontos de spawn). Um arquivo,
+    1 vez por dia, junto do catálogo. Grava só {slug: segundos} e a mediana; falhou, fica o arquivo anterior
+    (ou a mediana fixa, `S_POR_ABATE_MAPA`)."""
+    req = urllib.request.Request(URL_RITMO, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        dados = json.loads(r.read())
+    mapas = dados.get("mapas") or {}
+    hunts = {slug: round(float(mapas[m]["s"]), 3) for slug, m in (dados.get("hunts") or {}).items()
+             if isinstance(mapas.get(m), dict) and isinstance(mapas[m].get("s"), (int, float)) and mapas[m]["s"] > 0}
+    if not hunts:
+        raise ValueError("ritmo sem hunts: o formato mudou?")
+    caminhos.JOGO.mkdir(parents=True, exist_ok=True)
+    _gravar_json(caminhos.RITMO_JOGO, {"salvo_ms": int(time.time() * 1000), "versao": dados.get("versaoDoJogo"),
+                                       "mediana": (dados.get("faixa") or {}).get("mediana"), "hunts": hunts})
+    return len(hunts)
+
+
 # ---------------------------------------------------------------- o motor
 
 class SemDados(Exception):
@@ -332,7 +431,7 @@ class SemDados(Exception):
 class Motor:
     """Catálogo + hunts carregados uma vez; `xp_h()` avalia um Pokémon em microssegundos a milissegundos."""
 
-    def __init__(self, catalogo: dict, welcome: dict):
+    def __init__(self, catalogo: dict, welcome: dict, ritmo: dict | None = None):
         self.esp = {int(k): v for k, v in catalogo["especies"].items()}
         self.pedras = catalogo.get("pedras") or {}       # tipo → nome da pedra de evolução
         self.tem_evolucoes = any("e" in v for v in self.esp.values())
@@ -341,6 +440,10 @@ class Motor:
         self.shiny_stone_custo = c.get("shinyStoneCusto")   # None até o robô entrar com esta versão
         self.tabela = welcome.get("tabelaTipos") or _tabela_padrao()
         self._ef: dict = {}
+        # O tempo por abate de quem mata de um golpe, hunt a hunt (o mapa dela); hunt fora da tabela, a mediana.
+        por_hunt = (ritmo or {}).get("hunts") or {}
+        s_padrao = (ritmo or {}).get("mediana") or S_POR_ABATE_MAPA
+        self.tem_ritmo = bool(por_hunt)
         self.hunts = []
         for h in welcome.get("hunts") or []:
             n = int(h.get("nivel") or 1)
@@ -362,8 +465,9 @@ class Motor:
             for m in mobs:
                 m["w"] /= total
             self.hunts.append({"slug": h.get("slug"), "nome": h.get("nome") or h.get("slug"), "nivel": n,
-                               "xp": xp_do_nivel(n), "mobs": mobs})
+                               "xp": xp_do_nivel(n), "mobs": mobs, "s": float(por_hunt.get(h.get("slug")) or s_padrao)})
         self.hunts.sort(key=lambda h: -h["nivel"])
+        self.s_min = min([h["s"] for h in self.hunts] or [S_POR_ABATE_MAPA])
 
     # -- tipos
     def ef(self, atq: str, defesa: list) -> float:
@@ -412,7 +516,7 @@ class Motor:
         desc = 1 - pot_spd * (iv_spd / 32) / 100
         golpes = [(max(PODER_MINIMO, p), t, f, round(cd * desc) / 1000) for p, t, f, cd, ll in esp["g"] if ll <= L]
         fator_nivel = 2 * L / 5 + 2
-        teto_kph = 3600 / S_POR_ABATE_MAPA
+        teto_kph = 3600 / self.s_min        # nenhuma hunt passa disto: o mapa mais rápido, matando de um golpe
         # Teto do dano de um golpe contra qualquer selvagem: o golpe mais forte, com STAB e a maior
         # efetividade possível. Serve para descartar uma hunt sem simular.
         k_teto = fator_nivel * max([INVESTIDA_PODER] + [g[0] for g in golpes]) * max(atk, spa)
@@ -489,8 +593,8 @@ class Motor:
             if ritmo <= 0 or (max(m["hps"]) - abertura) / ritmo > MAX_LUTA_S:
                 return None
             ritmo_golpes = ritmo - d_inv / max(gap, cd_inv)
-            luta += m["w"] * max(0.0, (m["hp_medio"] - d_inv - S_POR_ABATE_MAPA * ritmo_golpes) / ritmo)
-        return h["xp"] * 3600 / (tempo_morto(S_POR_ABATE_MAPA, luta) + luta)
+            luta += m["w"] * max(0.0, (m["hp_medio"] - d_inv - h["s"] * ritmo_golpes) / ritmo)
+        return h["xp"] * 3600 / (tempo_morto(h["s"], luta) + luta)
 
     def _hunt(self, h, golpes, tipos, fator_nivel, atk, spa, dfs, spd_, hp_pk, gap, cd_inv, por_tipos):
         """XP/h numa hunt pela mini-luta, ou None se ele não mata."""
@@ -509,13 +613,16 @@ class Motor:
             if ritmo <= 0 or (max(m["hps"]) - abertura) / ritmo > MAX_LUTA_S:
                 return None                 # não mata nem no melhor caso
             por_mob.append((m, qs, k_fis, k_esp, d_inv))
+        s_mapa = h["s"]
+        lutas = []
         for m, qs, k_fis, k_esp, d_inv in por_mob:
             st, mt = m["st"], m["t"]
             gs = [((k_fis if fis else k_esp) * q + extra, cd) for q, fis, cd, extra in qs]
-            s = _segundos_por_abate(gs, d_inv, cd_inv, gap, m["hps"], S_POR_ABATE_MAPA)
+            s = _segundos_por_abate(gs, d_inv, cd_inv, gap, m["hps"], s_mapa)
             if s is None:
                 return None
             luta += m["w"] * s
+            lutas.append((m["w"], gs, d_inv, m["hps"]))
             # o que ele faz com a gente
             fn_mob = 2 * h["nivel"] / 5 + 2
             danos = []
@@ -528,14 +635,35 @@ class Motor:
             media = (sum(danos) / len(danos)) * 0.92 + inv * 0.08 if danos else inv
             dps += m["w"] * media * self.mult_dano / GAP_SELVAGEM_S
             hit_max = max(hit_max, max([inv] + danos) / RAND_MEDIO * self.mult_dano)
-        s_abate = tempo_morto(S_POR_ABATE_MAPA, luta) + luta
+        # A luta encurta a caminhada, e a caminhada mais curta deixa menos recarga para a luta. Como a
+        # calculadora: a luta simulada com o tempo morto do mapa e com o piso dele e, no meio, a reta entre as
+        # duas; o ponto fixo sai por bisseção.
+        piso = tempo_morto(s_mapa, math.inf)
+        if luta > 0.02 and s_mapa - piso > 0.02:
+            no_piso = 0.0
+            for w, gs, d_inv, hps in lutas:
+                s = _segundos_por_abate(gs, d_inv, cd_inv, gap, hps, piso)
+                if s is None:
+                    no_piso = None
+                    break
+                no_piso += w * s
+            if no_piso is not None:
+                luta_com = lambda morto: luta + (morto - s_mapa) * (no_piso - luta) / (piso - s_mapa)  # noqa: E731
+                lo, hi = piso, s_mapa
+                for _ in range(30):
+                    meio = (lo + hi) / 2
+                    if tempo_morto(s_mapa, luta_com(meio)) >= meio:
+                        lo = meio
+                    else:
+                        hi = meio
+                luta = luta_com((lo + hi) / 2)
+        s_abate = tempo_morto(s_mapa, luta) + luta
         kph = 3600 / s_abate
+        # Com poção, só morre quem leva o HP inteiro de um golpe; a calculadora desconta, mesmo de quem não
+        # morre, uma morte a cada 999 abates.
         um_hit = hit_max >= hp_pk
-        uptime = 1.0
-        if um_hit:                          # com poção, só morre quem leva o HP inteiro de um golpe
-            vida_s = hp_pk / hit_max * s_abate
-            uptime = vida_s / (vida_s + MORTE_S)
-        kph *= uptime
+        vida_s = (hp_pk / hit_max if um_hit else ABATES_POR_VIDA_MAX) * s_abate
+        kph *= vida_s / (vida_s + MORTE_S)
         return {"xp_h": kph * h["xp"], "kph": kph, "hunt": h["nome"], "slug": h["slug"], "nivel_hunt": h["nivel"],
                 "luta_s": round(luta, 2), "morre": um_hit}
 
@@ -611,9 +739,17 @@ def motor() -> Motor:
         marca = (caminhos.CATALOGO_JOGO.stat().st_mtime, caminhos.WELCOME_JOGO.stat().st_mtime)
     except OSError:
         raise SemDados("sem os dados do jogo ainda: o robô baixa o catálogo e guarda as hunts no próximo login")
+    try:
+        marca += (caminhos.RITMO_JOGO.stat().st_mtime,)
+    except OSError:
+        pass                        # sem a tabela de ritmo: a mediana fixa
     if _motor is None or _motor[0] != marca:
         cat = json.loads(caminhos.CATALOGO_JOGO.read_text(encoding="utf-8"))
         wel = json.loads(caminhos.WELCOME_JOGO.read_text(encoding="utf-8"))
-        _motor = (marca, Motor(cat, wel))
+        try:
+            rit = json.loads(caminhos.RITMO_JOGO.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            rit = None
+        _motor = (marca, Motor(cat, wel, rit))
         _cache.clear()              # dados do jogo novos: as contas antigas não valem mais
     return _motor[1]
