@@ -638,9 +638,10 @@ def checar_alertas() -> None:
 
 async def rodar(uma_vez: bool) -> None:
     cfg = ler_config()
-    ext = Extensao()
+    ext = Extensao() if cfg["_modo"] != "conta" else None   # "conta" escolhido à mão: nem escuta a extensão
     try:
-        await ext.iniciar()
+        if ext:
+            await ext.iniciar()
     except OSError as e:
         if cfg["_modo"] == "extensao":
             raise Fatal(f"a porta {ext.porta} da extensão está ocupada ({e.strerror or e})")
