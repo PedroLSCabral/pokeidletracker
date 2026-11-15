@@ -154,6 +154,7 @@ inicialização com o Windows. Se for preciso mover, rode `python src/bandeja.py
   - conexão fechada pelo jogo: espera 1 min, dobrando até 10 min, e zera depois de 10 min conectado;
   - **4001** (a conta foi aberta em outro lugar): espera 30 min, sem disputar a sessão;
   - nas esperas do modo automático, uma aba da extensão que liga corta a espera e troca o modo;
+  - no modo automático, uma recusa fatal da conta (token vencido porque ela foi aberta no Idle Deck, por exemplo) não para o robô: ele passa a esperar só a extensão, sem gravar no config;
   - qualquer outro erro: 5 min;
   - recusas fatais (`RECUSAS_FATAIS`: ban, token inválido…) param o robô com código 3.
 - **Estado ao vivo:** `agora(**campos)` grava `data/robo_agora.json` de forma atômica. Os campos são fase, detalhe, progresso da loja, erro e `acordar_ms`. É isso que o `mini.py` lê.

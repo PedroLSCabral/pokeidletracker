@@ -697,8 +697,14 @@ async def _rodar(cfg: dict, ext: "Extensao | None", uma_vez: bool) -> None:
             trocou = await _conta_ou_extensao(sessao(cfg, uma_vez), ext)
             if not trocou:
                 return  # só volta sem erro no --uma-vez
-        except Fatal:
-            raise
+        except Fatal as e:
+            if ext is None:
+                raise
+            # No automático, a conta recusada (token vencido, por exemplo: a conta foi aberta no
+            # Idle Deck) não para o robô: ele passa a esperar a extensão.
+            log(f"a conta coletora foi recusada ({e}); o robô passa a esperar só a extensão")
+            cfg["_modo"] = "extensao"
+            continue
         except websockets.ConnectionClosed as e:
             codigo = e.rcvd.code if e.rcvd else None
             if codigo == 4001:
