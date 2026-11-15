@@ -15,16 +15,16 @@ qualquer pessoa (ou IA) que vá mexer no código, para não ter que redescobrir 
 O pokeidle.io é um jogo idle de Pokémon com mercado de dinheiro real: as **gemas** podem ser sacadas
 (a ~US$ 0,009 cada) e os **coins** são a moeda de jogo. O projeto:
 
-1. **coleta** o mercado com uma conta separada (o robô): as vendas, a vitrine de itens e a loja de Pokémon;
+1. **coleta** o mercado (o robô): as vendas, a vitrine de itens e a loja de Pokémon. Ele chega ao jogo pela **extensão do Idle Deck** (a aba de uma conta empresta o socket do jogo) ou, no jeito antigo, com uma conta separada;
 2. **guarda** tudo num SQLite local (`data/market.db`);
 3. **analisa** esses dados: preços, revenda, alertas, preço justo de Pokémon, quando e por quanto vender e PvP;
 4. **mostra** num painel web local com o visual do jogo (`http://127.0.0.1:8770`) e avisa por Windows, Discord ou Telegram.
 
 ```
                        ┌─────────────────────── PC (Windows) ────────────────────────┐
- pokeidle.io           │                                                             │
- ┌──────────────┐  WS  │  bandeja.py  (ícone na bandeja; liga e vigia os dois abaixo) │
- │ socket do    │◄────►│   ├─ robo.py    sessão contínua no jogo → grava no banco      │
+ pokeidle.io           │  Idle Deck: aba de uma conta + extensao/ ──ws 127.0.0.1:8772─┐│
+ ┌──────────────┐  WS  │  bandeja.py  (ícone na bandeja; liga e vigia os dois abaixo) ││
+ │ socket do    │◄────►│   ├─ robo.py    pede as leituras pela aba (ou por uma conta) ◄┘│
  │ jogo         │      │   └─ painel.py  servidor HTTP 127.0.0.1:8770 (API + página)   │
  └──────────────┘      │  mini.py     janelinha de status (um clique no ícone)         │
  ┌──────────────┐ HTTP │                                                             │
@@ -76,7 +76,13 @@ pokeidletracker/
 │     ├─ app.js             toda a lógica da página (uma seção por aba)
 │     └─ app.css            visual do jogo (tokens de cor e fontes em :root)
 ├─ testes/
-│  └─ teste_robo_sessao.py  robô contra um jogo falso (sessão, queda, vitrine, poda)
+│  ├─ teste_robo_sessao.py  robô contra um jogo falso (sessão, queda, vitrine, poda)
+│  └─ teste_robo_extensao.py robô contra uma aba falsa da extensão (Origin, 4002, queda, troca automática)
+├─ extensao/                extensão do Idle Deck (MV3): liga a aba de uma conta ao robô
+│  ├─ manifest.json
+│  ├─ pagina.js             roda na página do jogo (world MAIN): pega o socket do jogo, filtra pedidos e respostas
+│  ├─ aba.js                mundo isolado: leva as mensagens entre a página e o fundo; o pontinho de status
+│  └─ fundo.js              service worker: a conexão ws://127.0.0.1:8772 com o robô
 ├─ legado/                  primeira tentativa de coleta: userscript no navegador (não roda no Idle Deck)
 │  ├─ userscript/pokeidle-coletor.user.js
 │  └─ iniciar-coletor.bat   liga o servidor do userscript (src/coleta/coletor.py, porta 8765)
@@ -128,20 +134,26 @@ inicialização com o Windows. Se for preciso mover, rode `python src/bandeja.py
 
 ### `robo.py`: o coletor
 - **Um robô por PC:** o mutex `Local\PokeIdleTrackerRobo` impede dois. Dois robôs na mesma conta se derrubam com o código 4001; um robô duplicado sai com código 3.
-- **Sessão contínua** (`sessao()`): conecta em `wss://pokeidle.io`, manda `hello`, espera o `welcome` e **fica conectado**. A cada volta do laço:
+- **Dois jeitos de chegar ao jogo** (`conexao` no config, resolvido por `ler_config()` em `cfg["_modo"]`):
+  - **`extensao`:** o robô escuta `ws://127.0.0.1:8772` (`Extensao`). A extensão do Idle Deck liga, se apresenta (`ext.oi`), recebe `ext.ok` e manda o `welcome` da aba. Daí `sessao_extensao()` usa essa conexão como se fosse o socket do jogo. Não há `hello` nem ping do robô (o jogo já pinga). Uma aba que cai faz o robô esperar a próxima (o export fica travado 2 min).
+  - **`conta`:** o jeito antigo, abaixo (`sessao()`, com nick e token).
+  - **sem `conexao`:** com token, usa a conta e escuta a extensão ao mesmo tempo. Quando uma aba liga, `_conta_ou_extensao()` larga a conta, grava `"conexao": "extensao"` e não volta mais para a conta (ela pode estar aberta no Idle Deck agora, e entrar com ela derrubaria a aba). Sem token, é `extensao`.
+- **Sessão contínua** (`sessao()`, modo conta): conecta em `wss://pokeidle.io`, manda `hello`, espera o `welcome` e **fica conectado**. Os dois modos terminam em `trabalhar()`. A cada volta do laço:
   1. `tarefas_locais()`: os nomes dos itens (1 vez por dia), a poda da vitrine (1 vez por hora), a pré-carga do PvP (a cada 6 h, numa thread) e o catálogo de espécies do jogo com o ritmo das hunts (1 vez por dia, numa thread, `caca.baixar_ritmo` e `caca.baixar_catalogo`).
   2. Vê o que está na hora (`proximas_tarefas()`): o export (quando o jogo libera), a vitrine (a cada minuto) e a loja de Pokémon (a cada 3 h).
   3. Faz cada uma: `pedir_export()`, `ler_vitrine()`, `varrer_loja_pokemon()`. Depois, `checar_alertas()`.
-  4. Dorme até a próxima tarefa (no mínimo 1 s, no máximo 10 min). Um ping a cada 25 s mantém a conexão viva.
+  4. Dorme até a próxima tarefa (no mínimo 1 s, no máximo 10 min), acordando na hora se a conexão cair (`Sessao.dormir`). No modo conta, um ping a cada 25 s mantém a conexão viva.
 - **Welcome:** ao entrar, `caca.guardar_welcome()` tira dele as hunts, as constantes de caça (e quantos fragmentos fazem uma Shiny Stone) e a tabela de tipos e grava em `data/jogo/welcome-dados.json` (o estado da conta não é guardado). Grava também `welcome-esqueleto.json`, só com as chaves, para conferir o formato quando o jogo mudar.
 - **`Sessao`:**
   - um leitor em segundo plano filtra as mensagens que interessam e as põe numa fila;
   - `pedir()` descarta o que chegou sem ser pedido, envia e espera a resposta que satisfaz a condição;
   - o prazo estica enquanto o gateway manda `vivo` (fila de login);
-  - um `sessao.renovada` com token novo é salvo no `config.local.json`.
+  - um `sessao.renovada` com token novo é salvo no `config.local.json` (só no modo conta);
+  - no modo extensão (`extensao=True`), um `erro` do jogo só vai para o log: a conta é a do dono, e um erro dela não para o robô.
 - **Reconexão** (`rodar()`):
   - conexão fechada pelo jogo: espera 1 min, dobrando até 10 min, e zera depois de 10 min conectado;
   - **4001** (a conta foi aberta em outro lugar): espera 30 min, sem disputar a sessão;
+  - nas esperas do modo automático, uma aba da extensão que liga corta a espera e troca o modo;
   - qualquer outro erro: 5 min;
   - recusas fatais (`RECUSAS_FATAIS`: ban, token inválido…) param o robô com código 3.
 - **Estado ao vivo:** `agora(**campos)` grava `data/robo_agora.json` de forma atômica. Os campos são fase, detalhe, progresso da loja, erro e `acordar_ms`. É isso que o `mini.py` lê.
@@ -250,6 +262,20 @@ O robô usa só isto; o cliente do jogo tem muito mais.
 | — | fechamento com código **4001** | A conta foi aberta em outro lugar |
 
 As moedas do jogo se chamam `orb` (gemas) e `gold` (coins).
+
+### 6.1.1 Extensão do Idle Deck (`extensao/` ↔ `ws://127.0.0.1:8772`)
+O Idle Deck (Electron 44, um app por conta, cada conta numa partição `persist:slot-…`) carrega extensões MV3 locais no **modo desenvolvedor**: janela de Extensões da conta → *Carregar pasta…*. Ele guarda uma **cópia** da pasta; mudou o código, *Recarregar da pasta*. A extensão vale só na conta em que foi carregada.
+
+```
+página do jogo (pagina.js, world MAIN) ⇄ window.postMessage ⇄ aba.js (isolado) ⇄ runtime.connect ⇄ fundo.js (service worker) ⇄ ws ⇄ robo.Extensao
+```
+- **`pagina.js`** troca o `WebSocket` da página por uma subclasse antes do código do jogo (`document_start`) e põe o primeiro ouvinte no socket do jogo. Se só pegar o socket no primeiro envio, segue sem poder engolir respostas e sem o welcome (`{"t":"welcome","parcial":true}`, que o robô não grava).
+  - **Do robô para o jogo:** só `csv.pedir`, `market.itens` e `market.listar`. O resto (inclusive `ping` e `hello`) é descartado.
+  - **Do jogo para o robô:** só as respostas a esses pedidos (casadas por tipo: `csv`, `market` + `aba`, com prazo de 60 s), os `erro` enquanto há pedido pendente e o `welcome` **sem o `estado`**. O token nunca é lido; o nick sai de `localStorage.sessao.nick`.
+  - **A resposta a um pedido do robô não chega ao jogo** (`stopImmediatePropagation`), a não ser que o próprio jogo tenha pedido a mesma coisa nesse meio-tempo. Sem isso, o jogo baixaria um .csv a cada hora e a tela do mercado mudaria sozinha.
+- **`aba.js`** liga a porta com o fundo quando o jogo está aberto e desliga quando o socket do jogo fecha. Manda um `vivo` a cada 20 s, para o service worker não dormir, e reconecta em 2 s se ele for encerrado. Desenha um pontinho no canto de baixo à esquerda: verde = ligado ao robô, laranja = esperando (o `title` diz o motivo).
+- **`fundo.js`** abre `ws://127.0.0.1:8772`, manda `{"t":"ext.oi","nick","versao"}` e, com o `{"t":"ext.ok"}`, avisa a aba. Robô fora do ar: tenta de novo a cada 10 s; `4002` (outra aba já ligada): a cada 60 s.
+- **No robô (`Extensao`):** só aceita `Origin: chrome-extension://…` (403 para o resto; um site não forja esse Origin). Uma aba por vez (`4002` para as outras); `4003` sem `ext.oi`; `4004` para uma extensão mais velha que `VERSAO_EXTENSAO_MIN`. A porta muda com `POKEIDLE_PORTA_EXTENSAO` (os testes usam isso), mas a extensão usa 8772 fixo.
 
 ### 6.2 Tracker público (`https://pokeidle.io/tracker/api/<rota>`, GET, JSON, sem login)
 É o site do botão "Tracker" do PvP. O jogo avisa quando alguém pede rápido demais, então
@@ -508,6 +534,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
 
 ```json
 {
+  "conexao": "extensao",
   "nick": "conta coletora",
   "token": "token da sessão (copiado do console do navegador; ver PLANO.md, Fase 2)",
   "dispositivo": "uuid gerado na primeira vez",
@@ -518,6 +545,8 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   }
 }
 ```
+
+**`conexao`:** `"extensao"` (só a extensão do Idle Deck; nick e token não são usados), `"conta"` (só a conta coletora) ou ausente (conta + escuta a extensão; troca para `"extensao"` sozinho quando uma aba liga). Para voltar à conta, ponha `"conta"`.
 
 **O token é uma credencial.** Ele nunca pode ser impresso em log, enviado para fora ou commitado. O
 robô atualiza o token sozinho quando o jogo manda `sessao.renovada`.
@@ -537,7 +566,9 @@ robô atualiza o token sozinho quando o jogo manda `sessao.renovada`.
 | Catálogo de espécies do jogo (XP/h) | 1 vez por dia, 1 s entre arquivos; falhou, tenta em 1 h | `robo.CATALOGO_A_CADA_MS` |
 | Hunts e constantes de caça | a cada login (vêm no `welcome`) | `caca.guardar_welcome` |
 | Ritmo das hunts (segundos por abate de cada mapa, da calculadora) | 1 vez por dia, junto do catálogo; falhou, fica o anterior | `caca.baixar_ritmo` |
-| Ping da sessão | 25 s | `Sessao._pingar` |
+| Ping da sessão | 25 s (só no modo conta) | `Sessao._pingar` |
+| Extensão: nova tentativa de ligar ao robô | 10 s; 60 s se outra aba já está ligada | `extensao/fundo.js` |
+| Extensão: prazo de um pedido sem resposta | 60 s | `extensao/pagina.js` |
 | Reconexão | 1 min dobrando até 10 min; 4001 espera 30 min; erro 5 min | robo |
 | Cache do Tracker | 5 min (você) / 6 h (meta e topo) / 12 h (espécie) | `pvp.TTL_S` |
 | Repetição de alerta | 6 h, ou se melhorar 5% | sinais |
@@ -549,7 +580,7 @@ robô atualiza o token sozinho quando o jogo manda `sessao.renovada`.
 
 1. **Termos de Uso do jogo:** nada de contornar limites nem sobrecarregar o servidor. Um export por hora, pausas entre páginas, cache no Tracker.
 2. **Nada de VPS ou VM:** a equipe do jogo proibiu. Tudo roda no PC do dono.
-3. **Uma conexão por conta:** abrir a conta coletora ou as do dono em outro lugar derruba a sessão que já existe (4001). Nunca entre nas contas do dono para testar.
+3. **Uma conexão por conta:** abrir a conta coletora ou as do dono em outro lugar derruba a sessão que já existe (4001). Nunca entre nas contas do dono para testar. A extensão não abre conexão: usa o socket que o jogo já tem e só manda os três pedidos de leitura (ver 6.1.1).
 4. **No máximo 4 contas por pessoa,** somando todas as redes. A coletora fica online o tempo todo e conta nesse limite.
 5. **O token e o `config.local.json` nunca saem do PC.** O `data/` também não vai para o git.
 6. **O repositório é público:** nada de nick de terceiros, dados pessoais ou infraestrutura pessoal nos arquivos versionados.
@@ -587,6 +618,8 @@ robô atualiza o token sozinho quando o jogo manda `sessao.renovada`.
 ## 14. Testes e verificação
 
 - **`python testes/teste_robo_sessao.py`:** o robô contra um jogo falso local, numa pasta temporária. Não toca no jogo nem no banco real.
+- **`python testes/teste_robo_extensao.py`:** o robô no modo extensão contra uma aba falsa (porta 8796): Origin recusado, `4002` para a segunda aba, queda e volta, e a troca automática da conta para a extensão.
+- **A extensão de verdade** foi testada num Chromium com a pasta carregada, a página do jogo e o socket simulados (Playwright `routeWebSocket`) e o robô real numa pasta temporária. No PC, não há como testá-la sem uma conta no Idle Deck: quem carrega é o dono.
 - **Painel de teste:** `.claude/launch.json` sobe uma cópia na porta 8771 (`python src/painel.py --porta 8771`), com o mesmo banco. Dá para testar rotas e página sem derrubar o painel em uso.
 - **Experimentos que gravam:** copie `data/market.db` para uma pasta temporária e aponte `importer.connect` para a cópia.
 - **Verificação rápida:**
@@ -628,5 +661,5 @@ Os módulos `shared/` do jogo são públicos (por exemplo, `https://pokeidle.io/
 - **Coleta curta:** tendências e "melhor horário" ficam pouco confiáveis nos primeiros dias, e a interface mostra a confiança. A média de 7 dias do jogo (`vitrine.media7_*`) ajuda nesse começo.
 - **O teto da loja de Pokémon é a página 200:** por isso a varredura faz as passadas do mais barato e do mais caro.
 - **O export vem atrasado:** uma venda pode chegar ao banco até ~1 h depois de acontecer. Contagens das últimas horas sobem com o tempo.
-- **Idle Deck:** as contas de caça do dono rodam lá (é um app fechado). O projeto não automatiza essas contas; o PvP lê só o Tracker público.
+- **Idle Deck:** as contas de caça do dono rodam lá (é um app fechado, Electron). O projeto não joga por essas contas: a extensão só lê o mercado por uma delas, e o PvP lê só o Tracker público. O Idle Deck carrega uma cópia da extensão: sem *Recarregar da pasta*, a versão nova não vale. Se o service worker dele for encerrado, a aba religa em 2 s e o robô começa uma sessão nova (uma varredura da loja no meio é retomada 30 min depois).
 - **Dados do XP/h:** a busca mostra "sem os dados do jogo ainda" até o robô entrar uma vez (hunts) e baixar o catálogo. Se o jogo mudar o formato do `welcome` ou da planilha de golpes, compare com `data/jogo/welcome-esqueleto.json` e com a contagem de `ler_planilhas` (26 tabelas, ~1.100 espécies e ~90 megas em 11/2026). O `ritmo.json` vem da calculadora (outro site): se ela mudar o formato, `baixar_ritmo` falha, o robô avisa no log e fica o arquivo anterior.

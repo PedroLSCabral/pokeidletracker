@@ -6,14 +6,15 @@ redescobrir o projeto lendo todos os arquivos. Abra só os módulos que a tarefa
 [`docs/PLANO.md`](docs/PLANO.md) é o diário (o porquê das decisões); consulte quando precisar do histórico.
 
 ## Em uma frase
-Um robô coleta o mercado do pokeidle.io com uma conta separada e grava num SQLite local
+Um robô coleta o mercado do pokeidle.io (pela extensão do Idle Deck, ou com uma conta separada) e grava num SQLite local
 (`data/market.db`). Um painel web local (`http://127.0.0.1:8770`) analisa esses dados: preços,
 revenda, alertas, botão vender, Pokémon e PvP. A bandeja do Windows mantém os dois rodando.
 
 ## Mapa de bolso
 | Preciso mexer em… | Arquivo |
 |---|---|
-| Socket do jogo, agenda, reconexão | `src/robo.py` |
+| Socket do jogo, agenda, reconexão, servidor da extensão | `src/robo.py` |
+| Extensão do Idle Deck (ponte aba do jogo ↔ robô) | `extensao/` (`pagina.js`, `aba.js`, `fundo.js`) |
 | Gravação de vendas, vitrine, itens, poda, agenda (`coleta`) | `src/coleta/coletor.py` |
 | Esquema do banco, CSV/JSON do export, `connect()` | `src/coleta/importer.py` |
 | Loja de Pokémon (tabelas e gravação) | `src/coleta/lojapk.py` |
@@ -34,7 +35,7 @@ revenda, alertas, botão vender, Pokémon e PvP. A bandeja do Windows mantém os
 ## Regras que não podem ser quebradas
 1. **Termos de Uso do jogo:** nada de contornar limites nem sobrecarregar o servidor. Um export por hora, pausas entre páginas, cache e 1,5 s entre pedidos no Tracker.
 2. **Nada de VPS ou VM:** a equipe do jogo proibiu. Não proponha rodar em nuvem.
-3. **Nunca entre nas contas do dono** (no navegador ou em script). Uma conexão nova derruba a outra (código 4001), e as contas dele rodam no Idle Deck.
+3. **Nunca entre nas contas do dono** (no navegador ou em script). Uma conexão nova derruba a outra (código 4001), e as contas dele rodam no Idle Deck. A extensão não entra: ela usa o socket que o jogo já abriu, só manda `csv.pedir`, `market.itens` e `market.listar`, e nunca lê o token. Não aumente essa lista sem o dono pedir.
 4. **O `config.local.json` tem o token da conta coletora:** não imprima, não commite, não mande para fora. `data/` também fica fora do git.
 5. **O repositório é público:** nada de nick de terceiros, dados pessoais ou infraestrutura pessoal.
 
@@ -50,7 +51,8 @@ revenda, alertas, botão vender, Pokémon e PvP. A bandeja do Windows mantém os
 - **Tudo:** `iniciar.bat`. A pokébola aparece na bandeja: duplo clique abre o painel, um clique abre o status, o botão direito abre o menu.
 - **Religar depois de mudar Python:** use o menu da bandeja ou mate o processo `src\robo.py`/`src\painel.py`; a bandeja religa em ~30 s. Mudou `bandeja.py`, `menu_bandeja.py` ou `tema.py`? Use Sair no menu e ligue de novo. Mudanças em `src/web/` só pedem recarregar a página.
 - **Painel de teste sem mexer no que está rodando:** `python src/painel.py --porta 8771` (já está em `.claude/launch.json`).
-- **Robô sem tocar no jogo:** `python testes/teste_robo_sessao.py` (jogo falso, banco temporário).
+- **Robô sem tocar no jogo:** `python testes/teste_robo_sessao.py` (jogo falso, banco temporário) e `python testes/teste_robo_extensao.py` (aba falsa da extensão).
+- **Extensão:** `node --check extensao/*.js`. Depois de mudar a pasta, ela só vale no Idle Deck com *Recarregar da pasta* (ele guarda uma cópia).
 - **Verificação rápida:**
   - `python -m py_compile src/*.py src/coleta/*.py src/analise/*.py`;
   - `node --check src/web/app.js`;

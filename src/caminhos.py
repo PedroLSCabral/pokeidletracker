@@ -26,6 +26,9 @@ RITMO_JOGO = JOGO / "ritmo.json"            # segundos por abate de cada hunt (s
 # Página do painel (HTML/CSS/JS servidos pelo painel.py).
 WEB = SRC / "web"
 
+# Extensão do Idle Deck (modo desenvolvedor > Carregar pasta…): liga a aba do jogo ao robô.
+EXTENSAO = RAIZ / "extensao"
+
 # Primeira tentativa de coleta, por userscript no navegador (fica como alternativa).
 LEGADO = RAIZ / "legado"
 USERSCRIPT = LEGADO / "userscript" / "pokeidle-coletor.user.js"

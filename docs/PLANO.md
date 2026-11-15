@@ -440,5 +440,13 @@ A busca pelo XP/h divergia da calculadora que serve de referência, a "Onde caç
 
 Resultado: os dois casos dão o número inteiro da calculadora (75.127.258 e 95.965.537). Em 200 anúncios, sem o atalho, a mesma hunt em 200. O atalho das 8 candidatas fixas errava 13 (até 15% a menos), porque a estimativa erra para mais quando sobra dano (um golpe forte num selvagem quase morto). Agora a luta simulada segue enquanto a estimativa da próxima ainda alcança a melhor simulada, e o custo ficou em ~4 a 10 ms por Pokémon. No painel aquecido, a 1ª busca por XP/h caiu de 14,7 s para 2,9 s.
 
+## Coleta pela extensão do Idle Deck (15/11)
+O Idle Deck ganhou um modo desenvolvedor que carrega extensões locais (MV3, Electron 44, por conta). Com isso a coleta voltou para dentro de uma aba do jogo, como a ideia do userscript, e a conta coletora fica livre para caçar: mais uma conta utilizável dentro do limite de 4.
+- **A extensão é só um cano.** Toda a agenda, a loja em passadas e a gravação continuam no robô; a extensão leva as mensagens entre o socket do jogo e `ws://127.0.0.1:8772`. Assim o robô não muda de comportamento (mesmos limites e pausas) e os dois modos dividem `trabalhar()`.
+- **Pelo fundo da extensão, não pela página.** Uma página https falando com 127.0.0.1 esbarra no CSP do jogo e no Private Network Access do Chromium; o service worker da extensão não.
+- **Sem conexão nova e sem token.** A página só deixa passar três pedidos de leitura e devolve ao robô só as respostas deles e o welcome sem o estado da conta. As respostas não chegam ao jogo (senão ele baixaria o .csv a cada hora e a tela do mercado pularia).
+- **Troca sem configurar nada.** Com a conta coletora configurada, o robô escuta a extensão ao mesmo tempo; quando uma aba liga, ele larga a conta e grava `"conexao": "extensao"`. Ele não volta para a conta sozinho, porque ela pode estar aberta no Idle Deck e um login do robô derrubaria a aba (4001).
+- **Por que a página precisa engolir a resposta:** o userscript trocava o `onmessage`; a extensão põe o primeiro ouvinte no socket ao criá-lo e usa `stopImmediatePropagation`, que também barra o `onmessage` e os `addEventListener` do jogo.
+
 ## Perguntas em aberto
 - Os nomes no export para as outras raridades devem ser `Uncommon`, `Mythic` e `Legendary` (só vimos `Common` e `Rare`). Isso se confirma quando aparecerem vendas.

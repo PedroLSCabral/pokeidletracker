@@ -1,14 +1,22 @@
-"""Robô coletor: entra com uma CONTA SÓ PARA COLETA, sem navegador, e grava no banco.
+"""Robô coletor: lê o mercado do jogo e grava no banco.
 
-    python src/robo.py --configurar   # cola o nick + token da conta coletora (uma vez)
+    python src/robo.py --configurar   # cola o nick + token da conta coletora (só no modo "conta")
     python src/robo.py                # roda para sempre
     python src/robo.py --uma-vez      # uma rodada só (teste)
 
-Entra uma vez no socket do jogo (`hello` → `welcome`) e fica conectado: lê a vitrine de itens
-a cada minuto, pede o export quando o jogo libera (1 por hora) e, a cada 3 h, lê a loja de Pokémon
-inteira. Ficar conectado evita um login novo a cada minuto. Se a conexão cair, entra de novo
-(espera 1 min, dobrando a cada queda seguida até 10 min). O que ele está fazendo agora fica em
-data/robo_agora.json (a janelinha de status, src/mini.py, lê esse arquivo).
+Há dois jeitos de chegar ao jogo (`conexao` no config.local.json):
+  - "extensao": a extensão do Idle Deck (pasta extensao/) liga a aba de uma conta ao robô por
+    ws://127.0.0.1:8772 e o robô pede as leituras pelo socket que o jogo já tem aberto. Nenhuma
+    conta fica presa ao robô.
+  - "conta" (o antigo): o robô entra sozinho com uma conta só para coleta (nick + token).
+Sem `conexao`, o robô usa a conta e também escuta a extensão; quando uma aba da extensão liga,
+ele larga a conta, passa para "extensao" de vez e grava isso no config (para não voltar a entrar
+com uma conta que agora pode estar aberta no Idle Deck). Sem token, ele só espera a extensão.
+
+Ligado ao jogo, ele lê a vitrine de itens a cada minuto, pede o export quando o jogo libera
+(1 por hora) e, a cada 3 h, lê a loja de Pokémon inteira. Se a conexão cair, entra de novo
+(conta: espera 1 min, dobrando até 10 min; extensão: espera a aba voltar). O que ele está fazendo
+agora fica em data/robo_agora.json (a janelinha de status, src/mini.py, lê esse arquivo).
 
 Regras que o robô respeita:
   - 1 export por hora: usa o tempo que o próprio jogo devolve (`esperaMs`/`restaMs`).
@@ -48,6 +56,8 @@ AGORA = caminhos.AGORA_ROBO
 URL_JOGO = os.environ.get("POKEIDLE_WS", "wss://pokeidle.io")
 URL_ITENS = os.environ.get("POKEIDLE_ITENS", "https://pokeidle.io/assets/items.json")
 ORIGEM = "https://pokeidle.io"
+PORTA_EXTENSAO = int(os.environ.get("POKEIDLE_PORTA_EXTENSAO", "8772"))  # a mesma de extensao/fundo.js
+VERSAO_EXTENSAO_MIN = (1, 0, 0)
 USER_AGENT = "Mozilla/5.0 (pokeidletracker coletor)"
 
 ESPERA_WELCOME_S = 90      # o login pode ficar na fila do gateway (ele manda `vivo` enquanto isso)
@@ -55,6 +65,7 @@ ESPERA_RESPOSTA_S = 30
 CHECAR_NO_MAXIMO_A_CADA_S = 10 * 60
 ESPERA_APOS_ERRO_S = 5 * 60
 ESPERA_SESSAO_TOMADA_S = 30 * 60
+ESPERA_EXT_OI_S = 10       # a aba da extensão se apresenta (`ext.oi`) logo que conecta
 RECONEXAO_MIN_S, RECONEXAO_MAX_S = 60, 10 * 60   # queda de conexão: 1 min, dobrando até 10 min
 SESSAO_ESTAVEL_S = 10 * 60                        # conectado por mais que isso zera a espera
 PODAR_A_CADA_MS = 60 * 60_000
@@ -114,12 +125,17 @@ def log(msg: str) -> None:
 # ---------------------------------------------------------------- configuração
 
 def ler_config() -> dict:
-    if not CONFIG.exists():
-        raise Fatal(f"falta {CONFIG.name}; rode  python src/robo.py --configurar")
-    cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
-    if not cfg.get("nick") or not cfg.get("token"):
-        raise Fatal(f"{CONFIG.name} sem nick ou token; rode  python src/robo.py --configurar")
-    if not cfg.get("dispositivo"):
+    """O config, com `conexao` resolvida: "extensao", "conta" ou "auto" (conta + escuta a extensão)."""
+    cfg = json.loads(CONFIG.read_text(encoding="utf-8")) if CONFIG.exists() else {}
+    modo = cfg.get("conexao")
+    tem_conta = bool(cfg.get("nick") and cfg.get("token"))
+    if modo not in ("extensao", "conta"):
+        modo = "auto" if tem_conta else "extensao"
+    if modo == "conta" and not tem_conta:
+        raise Fatal(f"{CONFIG.name} sem nick ou token; rode  python src/robo.py --configurar"
+                    " (ou use \"conexao\": \"extensao\")")
+    cfg["_modo"] = modo
+    if modo != "extensao" and not cfg.get("dispositivo"):
         cfg["dispositivo"] = str(uuid.uuid4())
         salvar_config(cfg)
     return cfg
@@ -127,7 +143,8 @@ def ler_config() -> dict:
 
 def salvar_config(cfg: dict) -> None:
     tmp = CONFIG.with_suffix(".tmp")
-    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    limpo = {k: v for k, v in cfg.items() if not k.startswith("_")}
+    tmp.write_text(json.dumps(limpo, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(CONFIG)
 
 
@@ -187,8 +204,8 @@ class Sessao:
 
     INTERESSA = ('"welcome"', '"csv"', '"market"', '"erro"', '"sessao.renovada"', '"vivo"')
 
-    def __init__(self, ws, cfg):
-        self.ws, self.cfg = ws, cfg
+    def __init__(self, ws, cfg, extensao: bool = False):
+        self.ws, self.cfg, self.extensao = ws, cfg, extensao
         self.fila: asyncio.Queue = asyncio.Queue()
         self.vivo_em = time.monotonic()
 
@@ -201,13 +218,15 @@ class Sessao:
                 tipo = m.get("t")
                 if tipo == "vivo":
                     self.vivo_em = time.monotonic()
-                elif tipo == "sessao.renovada" and m.get("token"):
+                elif tipo == "sessao.renovada" and m.get("token") and not self.extensao:
                     self.cfg["token"] = m["token"]
                     salvar_config(self.cfg)
                     log("token renovado pelo jogo e salvo")
                 elif tipo == "erro":
                     chave = m.get("chave") or ""
-                    if chave in RECUSAS_FATAIS:
+                    if self.extensao:  # a conta é do jogo do dono: um erro dela não para o robô
+                        log(f"aviso do jogo (pela extensão): {chave or m.get('msg') or m}")
+                    elif chave in RECUSAS_FATAIS:
                         await self.fila.put(Fatal(RECUSAS_FATAIS[chave]))
                     elif chave in RECUSAS_ESPERAR:
                         await self.fila.put(ConnectionError(f"rede cheia ({chave}); tentando mais tarde"))
@@ -239,6 +258,17 @@ class Sessao:
                 raise m
             if condicao(m):
                 return m
+
+    async def dormir(self, segundos: float) -> None:
+        """Dorme até a próxima tarefa, mas acorda na hora se a conexão cair (a fila recebe a queda)."""
+        prazo = time.monotonic() + segundos
+        while (resta := prazo - time.monotonic()) > 0:
+            try:
+                m = await asyncio.wait_for(self.fila.get(), timeout=resta)
+            except asyncio.TimeoutError:
+                return
+            if isinstance(m, BaseException):
+                raise m
 
     def _descartar_antigas(self):
         """Joga fora o que chegou sem ser pedido (numa sessão longa o jogo pode empurrar atualizações),
@@ -345,7 +375,7 @@ def _precarregar_pvp() -> None:
 
 
 async def sessao(cfg: dict, uma_vez: bool) -> None:
-    """Entra no jogo e fica: a cada volta faz o que estiver na hora e dorme até a próxima tarefa."""
+    """Modo conta: entra no jogo com a conta coletora e fica fazendo as tarefas."""
     async with websockets.connect(
         URL_JOGO, origin=ORIGEM, user_agent_header=USER_AGENT,
         max_size=64 * 2**20, open_timeout=30, ping_interval=None,
@@ -358,43 +388,150 @@ async def sessao(cfg: dict, uma_vez: bool) -> None:
                                       "delta": 1, "dispositivo": cfg["dispositivo"]}))
             welcome = await s.esperar(lambda m: m.get("t") == "welcome", ESPERA_WELCOME_S)
             log("conectado (fica conectado entre as leituras)")
-            try:  # as hunts e as constantes de caça vêm no welcome: guarda para o XP/h da busca
-                r = caca.guardar_welcome(welcome)
-                if not r["hunts"]:
-                    log(f"caça: o welcome não trouxe a lista de hunts ({r})")
-            except Exception as e:
-                log(f"caça: não deu para guardar o welcome: {e!r}")
-            agora(erro=None, conectado_ms=coletor.agora_ms())
-            while True:
-                con = importer.connect()
-                try:
-                    tarefas_locais(con)
-                    exportar, vitrine, _, pokemon, _ = proximas_tarefas(con)
-                finally:
-                    con.close()
-                if exportar:
-                    await pedir_export(s, cfg)
-                if vitrine:
-                    await ler_vitrine(s)
-                if pokemon:
-                    await varrer_loja_pokemon(s)
-                if exportar or vitrine or pokemon:
-                    agora(fase="alertas", detalhe="conferindo os alertas")
-                    checar_alertas()
-                if uma_vez:
-                    return
-                con = importer.connect()
-                try:
-                    *_, espera = proximas_tarefas(con)
-                finally:
-                    con.close()
-                espera = min(max(espera, 1), CHECAR_NO_MAXIMO_A_CADA_S)
-                agora(fase="esperando", detalhe="conectado, esperando a próxima tarefa", loja=None,
-                      acordar_ms=coletor.agora_ms() + espera * 1000)
-                await asyncio.sleep(espera)
+            await trabalhar(s, welcome, cfg, uma_vez)
         finally:
             pinger.cancel()
             leitor.cancel()
+
+
+async def sessao_extensao(lig: "Ligacao", uma_vez: bool) -> None:
+    """Modo extensão: usa o socket do jogo de uma aba do Idle Deck, pela extensão."""
+    s = Sessao(lig.ws, {"nick": lig.nick}, extensao=True)
+    leitor = asyncio.create_task(s._ler())
+    try:
+        # A aba manda o welcome (sem o estado da conta) logo depois do `ext.ok`. O jogo já pinga sozinho.
+        await lig.ws.send(json.dumps({"t": "ext.ok"}, separators=(",", ":")))
+        welcome = await s.esperar(lambda m: m.get("t") == "welcome", ESPERA_WELCOME_S)
+        log(f"ligado pela extensão do Idle Deck (conta {lig.nick}, extensão v{lig.versao})")
+        await trabalhar(s, welcome, {"nick": lig.nick}, uma_vez)
+    finally:
+        leitor.cancel()
+        lig.terminar()
+
+
+async def trabalhar(s: Sessao, welcome: dict, cfg: dict, uma_vez: bool) -> None:
+    """Já ligado ao jogo: a cada volta faz o que estiver na hora e dorme até a próxima tarefa."""
+    if not welcome.get("parcial"):
+        try:  # as hunts e as constantes de caça vêm no welcome: guarda para o XP/h da busca
+            r = caca.guardar_welcome(welcome)
+            if not r["hunts"]:
+                log(f"caça: o welcome não trouxe a lista de hunts ({r})")
+        except Exception as e:
+            log(f"caça: não deu para guardar o welcome: {e!r}")
+    agora(erro=None, conectado_ms=coletor.agora_ms(), conexao="extensao" if s.extensao else "conta",
+          conta=cfg.get("nick"))
+    while True:
+        con = importer.connect()
+        try:
+            tarefas_locais(con)
+            exportar, vitrine, _, pokemon, _ = proximas_tarefas(con)
+        finally:
+            con.close()
+        if exportar:
+            await pedir_export(s, cfg)
+        if vitrine:
+            await ler_vitrine(s)
+        if pokemon:
+            await varrer_loja_pokemon(s)
+        if exportar or vitrine or pokemon:
+            agora(fase="alertas", detalhe="conferindo os alertas")
+            checar_alertas()
+        if uma_vez:
+            return
+        con = importer.connect()
+        try:
+            *_, espera = proximas_tarefas(con)
+        finally:
+            con.close()
+        espera = min(max(espera, 1), CHECAR_NO_MAXIMO_A_CADA_S)
+        agora(fase="esperando", detalhe="conectado, esperando a próxima tarefa", loja=None,
+              acordar_ms=coletor.agora_ms() + espera * 1000)
+        await s.dormir(espera)
+
+
+# ---------------------------------------------------------------- extensão do Idle Deck
+
+class Ligacao:
+    """Uma aba do Idle Deck ligada pela extensão: o websocket dela, a conta e a versão."""
+
+    def __init__(self, ws, nick: str, versao: str):
+        self.ws, self.nick, self.versao = ws, nick, versao
+        self.fim = asyncio.get_running_loop().create_future()
+
+    def terminar(self) -> None:
+        if not self.fim.done():
+            self.fim.set_result(None)
+
+
+def _origem_da_extensao(*args):
+    """Só aceita conexões vindas de uma extensão (Origin chrome-extension://…). Uma página da internet
+    não consegue forjar esse Origin, então nenhum site consegue se passar pela extensão."""
+    if len(args) == 2 and hasattr(args[1], "headers"):   # websockets ≥ 13: (conexão, pedido)
+        con, pedido = args
+        origem = pedido.headers.get("Origin") or ""
+        if not origem.startswith("chrome-extension://"):
+            return con.respond(403, "só a extensão do PokeIdle Tracker\n")
+        return None
+    origem = args[1].get("Origin") or ""                 # websockets antigo: (caminho, cabeçalhos)
+    if not origem.startswith("chrome-extension://"):
+        return (403, [], b"so a extensao do PokeIdle Tracker\n")
+    return None
+
+
+class Extensao:
+    """Servidor em 127.0.0.1 que recebe a extensão do Idle Deck. Uma aba por vez: as outras recebem
+    4002 e tentam de novo mais tarde (a extensão pode estar em mais de uma conta)."""
+
+    def __init__(self, porta: int = PORTA_EXTENSAO):
+        self.porta = porta
+        self.chegou: asyncio.Queue = asyncio.Queue()
+        self.atual: Ligacao | None = None
+        self.servidor = None
+
+    async def iniciar(self) -> None:
+        self.servidor = await websockets.serve(self._receber, "127.0.0.1", self.porta,
+                                               process_request=_origem_da_extensao,
+                                               max_size=64 * 2**20, ping_interval=20, ping_timeout=60)
+
+    async def _receber(self, ws, *_):
+        if self.atual is not None and not self.atual.fim.done():
+            await ws.close(4002, "outra aba já está ligada")
+            return
+        try:
+            oi = json.loads(await asyncio.wait_for(ws.recv(), ESPERA_EXT_OI_S))
+        except Exception:
+            return
+        if not isinstance(oi, dict) or oi.get("t") != "ext.oi":
+            await ws.close(4003, "esperava ext.oi")
+            return
+        versao = str(oi.get("versao") or "0")
+        try:
+            velha = tuple(int(x) for x in versao.split(".")) < VERSAO_EXTENSAO_MIN
+        except ValueError:
+            velha = True
+        if velha:
+            log(f"extensão v{versao} é antiga demais; recarregue a pasta extensao/ no Idle Deck")
+            await ws.close(4004, "extensão antiga")
+            return
+        nick = str(oi.get("nick") or "?")[:40]
+        self.atual = lig = Ligacao(ws, nick, versao)
+        await self.chegou.put(lig)
+        # A conexão fica aberta enquanto a sessão do robô usa a aba. Se a aba cair antes de o robô
+        # pegá-la da fila, ela também termina (senão as outras abas ficariam recusadas à toa).
+        fechou = asyncio.ensure_future(ws.wait_closed())
+        try:
+            await asyncio.wait({lig.fim, fechou}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            fechou.cancel()
+            lig.terminar()
+
+    async def proxima(self) -> Ligacao:
+        """A próxima aba ligada que ainda está de pé."""
+        while True:
+            lig = await self.chegou.get()
+            if not lig.fim.done() and lig.ws.state.name == "OPEN":
+                return lig
+            lig.terminar()
 
 
 async def varrer_loja_pokemon(s: Sessao) -> None:
@@ -408,6 +545,7 @@ async def varrer_loja_pokemon(s: Sessao) -> None:
     con = importer.connect()
     try:
         coletor.put(con, pokemon_tentativa_em=t0)
+        lojapk.preparar(con)   # num banco novo a tabela ainda não existe
         ultima = con.execute("SELECT anuncios FROM pk_varreduras ORDER BY snap_ms DESC LIMIT 1").fetchone()
     finally:
         con.close()
@@ -500,14 +638,64 @@ def checar_alertas() -> None:
 
 async def rodar(uma_vez: bool) -> None:
     cfg = ler_config()
-    log(f"robô ligado com a conta {cfg['nick']} → {URL_JOGO}")
+    ext = Extensao()
+    try:
+        await ext.iniciar()
+    except OSError as e:
+        if cfg["_modo"] == "extensao":
+            raise Fatal(f"a porta {ext.porta} da extensão está ocupada ({e.strerror or e})")
+        log(f"não deu para escutar a extensão na porta {ext.porta} ({e!r}); segue só com a conta")
+        ext = None
+    if cfg["_modo"] == "extensao":
+        log(f"robô ligado no modo extensão: esperando uma aba do Idle Deck em ws://127.0.0.1:{PORTA_EXTENSAO}")
+    else:
+        log(f"robô ligado com a conta {cfg['nick']} → {URL_JOGO}"
+            + (f" (e escutando a extensão na porta {PORTA_EXTENSAO})" if ext else ""))
+    try:
+        await _rodar(cfg, ext, uma_vez)
+    finally:
+        if ext:
+            ext.servidor.close()
+
+
+async def _rodar(cfg: dict, ext: "Extensao | None", uma_vez: bool) -> None:
     reconexao = RECONEXAO_MIN_S
     while True:
-        agora(fase="conectando", detalhe="entrando no jogo", loja=None, erro=None, acordar_ms=None)
+        if cfg["_modo"] == "extensao":
+            agora(fase="conectando", detalhe="esperando a aba do Idle Deck (extensão)", loja=None,
+                  acordar_ms=None, conexao="extensao")
+            lig = await ext.proxima()
+            try:
+                await sessao_extensao(lig, uma_vez)
+                return  # só volta sem erro no --uma-vez
+            except Fatal:
+                raise
+            except websockets.ConnectionClosed as e:
+                codigo = e.rcvd.code if e.rcvd else None
+                log(f"a aba do Idle Deck desligou (código {codigo}); esperando ela voltar")
+                agora(erro="a aba do Idle Deck desligou")
+            except Exception as e:
+                log(f"sessão pela extensão falhou: {e!r}; esperando a aba de novo")
+                agora(erro=f"a sessão pela extensão falhou: {e!r}"[:160])
+            con = importer.connect()
+            try:  # um export pedido e não respondido não fica travado, nem é pedido duas vezes seguidas
+                coletor.put(con, export_trava_ate=coletor.agora_ms() + 2 * 60_000)
+            finally:
+                con.close()
+            if uma_vez:
+                return
+            await asyncio.sleep(2)
+            continue
+
+        agora(fase="conectando", detalhe="entrando no jogo", loja=None, erro=None, acordar_ms=None,
+              conexao="conta")
         inicio = time.monotonic()
+        espera = 0
+        trocou = False
         try:
-            await sessao(cfg, uma_vez)
-            return  # só volta sem erro no --uma-vez
+            trocou = await _conta_ou_extensao(sessao(cfg, uma_vez), ext)
+            if not trocou:
+                return  # só volta sem erro no --uma-vez
         except Fatal:
             raise
         except websockets.ConnectionClosed as e:
@@ -527,6 +715,13 @@ async def rodar(uma_vez: bool) -> None:
             log(f"sessão falhou: {e!r}; tentando em 5 min")
             espera = ESPERA_APOS_ERRO_S
             agora(erro=f"a sessão falhou: {e!r}"[:160])
+        if trocou:
+            # A extensão chegou: daqui para a frente o robô não entra mais com a conta coletora.
+            cfg["conexao"] = cfg["_modo"] = "extensao"
+            salvar_config(cfg)
+            log("extensão do Idle Deck ligada: o robô largou a conta coletora e passa a usar só a extensão "
+                "(conexao = extensao no config)")
+            continue
         con = importer.connect()
         try:  # um export pedido e não respondido não fica travado para sempre
             coletor.put(con, export_trava_ate=coletor.agora_ms() + espera * 1000)
@@ -536,7 +731,50 @@ async def rodar(uma_vez: bool) -> None:
             return
         agora(fase="esperando", detalhe="desconectado, esperando para entrar de novo", loja=None,
               acordar_ms=coletor.agora_ms() + espera * 1000)
-        await asyncio.sleep(espera)
+        if await _esperar_ou_extensao(espera, ext):
+            cfg["conexao"] = cfg["_modo"] = "extensao"
+            salvar_config(cfg)
+            log("extensão do Idle Deck ligada: o robô passa a usar só a extensão (conexao = extensao no config)")
+
+
+async def _conta_ou_extensao(trabalho, ext: Extensao | None) -> bool:
+    """Roda a sessão da conta; se uma aba da extensão ligar antes de ela acabar, cancela a sessão
+    e devolve True (a aba fica na fila para o modo extensão pegar)."""
+    tarefa = asyncio.ensure_future(trabalho)
+    if ext is None:
+        await tarefa
+        return False
+    olhar = asyncio.ensure_future(_espiar(ext))
+    try:
+        feito, _ = await asyncio.wait({tarefa, olhar}, return_when=asyncio.FIRST_COMPLETED)
+        if tarefa in feito:
+            tarefa.result()
+            return False
+        tarefa.cancel()
+        try:
+            await tarefa
+        except (asyncio.CancelledError, Exception):
+            pass
+        return True
+    finally:
+        olhar.cancel()
+
+
+async def _espiar(ext: Extensao) -> None:
+    """Termina quando há uma aba da extensão na fila (sem tirá-la de lá)."""
+    while ext.chegou.empty():
+        await asyncio.sleep(0.5)
+
+
+async def _esperar_ou_extensao(espera_s: float, ext: Extensao | None) -> bool:
+    if ext is None:
+        await asyncio.sleep(espera_s)
+        return False
+    try:
+        await asyncio.wait_for(_espiar(ext), espera_s)
+        return True
+    except asyncio.TimeoutError:
+        return False
 
 
 # Código de saída de "parei de propósito, não adianta religar" (sessão recusada, robô duplicado).
