@@ -9,9 +9,10 @@ no Shiftry, iguais aos dela). A busca precisa de centenas em cerca de um segundo
    de longo prazo: cada golpe sai uma vez por recarga (que corre também na caminhada entre abates) e a
    Investida a cada 2 s de luta. As hunts são vistas da mais alta para a mais baixa, e a busca para quando
    nem o teto de uma hunt (3600 ÷ tempo do mapa mais rápido × XP do abate) alcança as melhores estimativas.
-2. **A luta só nas melhores estimativas** (`_hunt`, `CANDIDATAS`): 32 abates (IV de HP do selvagem de 1 a
-   32); a cada intervalo, o golpe pronto de maior dano, senão a Investida; os trechos só de Investida são
-   saltados de uma vez (dá o mesmo que ir de golpe em golpe).
+2. **A luta só nas melhores estimativas** (`_hunt`): da melhor estimativa para a pior, no mínimo
+   `CANDIDATAS` (8) e depois só enquanto a estimativa da próxima ainda alcança a melhor simulada (até 40).
+   A luta: 32 abates (IV de HP do selvagem de 1 a 32); a cada intervalo, o golpe pronto de maior dano, senão
+   a Investida; os trechos só de Investida são saltados de uma vez (dá o mesmo que ir de golpe em golpe).
 
 As regras vêm dos módulos públicos do jogo (`shared/*.mjs`, ver docs/ARQUITETURA.md, seção 14.1):
 - dano = ((2·nível/5 + 2) · poder · ATK/DEF) / 50 + 2, × STAB 1,5 × efetividade × 0,925 (rolagem média);

@@ -431,5 +431,14 @@ Na análise de um Pokémon (Pokémon > Analisar e precificar), uma caixa diz se 
 - **Veredito:** "vale" quando fica pelo menos 15% mais forte (ou ganha 8 pontos de chance média nos duelos) e a espécie entra no time; "fica mais forte, mas não entra no seu time" quando só a força melhora. Também mostra o tempo até poder levar ao ranqueado e os anúncios dela já pronta (nota parecida, nível pelo menos o do seu), para comparar com comprar.
 - **Sem nick:** só o meta da faixa high elo, sem duelos.
 
+## XP/h igual ao da calculadora de hunt (15/11)
+A busca pelo XP/h divergia da calculadora que serve de referência, a "Onde caçar?" do pokeidleguide.io: Abomasnow Nv 1176 com 90 mi contra 75,1 mi e Furious Scizor Nv 1240 com 88,8 mi contra 96 mi, com a ordem invertida. O "Hunt Analyser" de dentro do jogo não serve de régua: ele multiplica o XP do abate por abates/h fixos da hunt e não olha o Pokémon. Lendo o motor da calculadora (no PC, só leitura) e rodando-o em Node com os mesmos anúncios, faltavam:
+- **o tempo do mapa de cada hunt** (3,05 a 3,76 s por abate, do simulador do jogo), no lugar da mediana de 3,41 s. A calculadora publica a tabela; o robô baixa uma vez por dia;
+- **o ponto fixo entre a luta e a caminhada**, que tinha ficado de fora em 10/11: quem luta mais anda menos e tem menos recarga para a luta. O Abomasnow no Gible luta 4,7 s por abate, e não 3,4 s;
+- **32 abates por espécie** (IV de HP 1 a 32), até 4.000 golpes por abate e a morte a cada 999 abates que ela desconta;
+- **no catálogo**, quatro passos do cliente: a Outland com a planilha própria ou os golpes da espécie nacional do nome (o Furious Scizor estava com os golpes antigos, com nível de aprendizado), Orre com os golpes da nacional, os tipos do Lucario e as megas com os tipos e os stats-base delas. O 2º golpe de 600 de quem tem um só sai pelo nome (o Banshee Misdreavus ficava com o mesmo duas vezes).
+
+Resultado: os dois casos dão o número inteiro da calculadora (75.127.258 e 95.965.537). Em 200 anúncios, sem o atalho, a mesma hunt em 200. O atalho das 8 candidatas fixas errava 13 (até 15% a menos), porque a estimativa erra para mais quando sobra dano (um golpe forte num selvagem quase morto). Agora a luta simulada segue enquanto a estimativa da próxima ainda alcança a melhor simulada, e o custo ficou em ~4 a 10 ms por Pokémon. No painel aquecido, a 1ª busca por XP/h caiu de 14,7 s para 2,9 s (o limite de 400 golpes por abate fazia o código antigo simular demais nos fracos).
+
 ## Perguntas em aberto
 - Os nomes no export para as outras raridades devem ser `Uncommon`, `Mythic` e `Legendary` (só vimos `Common` e `Rare`). Isso se confirma quando aparecerem vendas.

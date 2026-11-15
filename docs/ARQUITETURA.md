@@ -83,7 +83,7 @@ pokeidletracker/
 ├─ .claude/launch.json      cópia do painel na porta 8771, para testar sem mexer no que está rodando
 ├─ config.local.json        (fora do git) nick + token da conta coletora, canais de alerta
 └─ data/                    (fora do git) market.db, logs, robo_agora.json, inbox/ do importador e jogo/
-                            (catalogo.json e welcome-dados.json, para o XP/h e a evolução)
+                            (catalogo.json, welcome-dados.json e ritmo.json, para o XP/h e a evolução)
 ```
 
 **Como os imports funcionam.** Os quatro programas ficam em `src/` e põem `src/` no `sys.path`. Os
@@ -129,7 +129,7 @@ inicialização com o Windows. Se for preciso mover, rode `python src/bandeja.py
 ### `robo.py`: o coletor
 - **Um robô por PC:** o mutex `Local\PokeIdleTrackerRobo` impede dois. Dois robôs na mesma conta se derrubam com o código 4001; um robô duplicado sai com código 3.
 - **Sessão contínua** (`sessao()`): conecta em `wss://pokeidle.io`, manda `hello`, espera o `welcome` e **fica conectado**. A cada volta do laço:
-  1. `tarefas_locais()`: os nomes dos itens (1 vez por dia), a poda da vitrine (1 vez por hora), a pré-carga do PvP (a cada 6 h, numa thread) e o catálogo de espécies do jogo (1 vez por dia, numa thread, `caca.baixar_catalogo`).
+  1. `tarefas_locais()`: os nomes dos itens (1 vez por dia), a poda da vitrine (1 vez por hora), a pré-carga do PvP (a cada 6 h, numa thread) e o catálogo de espécies do jogo com o ritmo das hunts (1 vez por dia, numa thread, `caca.baixar_ritmo` e `caca.baixar_catalogo`).
   2. Vê o que está na hora (`proximas_tarefas()`): o export (quando o jogo libera), a vitrine (a cada minuto) e a loja de Pokémon (a cada 3 h).
   3. Faz cada uma: `pedir_export()`, `ler_vitrine()`, `varrer_loja_pokemon()`. Depois, `checar_alertas()`.
   4. Dorme até a próxima tarefa (no mínimo 1 s, no máximo 10 min). Um ping a cada 25 s mantém a conexão viva.
@@ -402,16 +402,17 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
 - **`padroes(...)`** mostra volume, prêmios por atributo, espécies, horários e compradores.
 
 ### `analise/caca.py` (XP por hora de caça)
-- **O que responde:** quanto XP/h um Pokémon faz hoje, na melhor hunt liberada para um nível de treinador, sem AoE, TM, bike, casa ou bônus. A explicação completa está no topo do arquivo.
+- **O que responde:** quanto XP/h um Pokémon faz hoje, na melhor hunt liberada para um nível de treinador, sem AoE, TM, bike, casa ou bônus. A referência é a calculadora "Onde caçar?" do pokeidleguide.io (aba `#hunt`): a conta de cada hunt é a mesma dela. A explicação completa está no topo do arquivo.
 - **Dados** (em `data/jogo/`, fora do git):
-  - `catalogo.json`, montado por `baixar_catalogo()` como o cliente do jogo monta. Junta os quatro `assets/creatures*.json` e as correções (`creatures-audit-overrides.json`). Troca os golpes pelos das planilhas de balanceamento (`shared/golpes-planilhas.mjs`, lido por expressão regular em `ler_planilhas`). Injeta os golpes de assinatura de poder 600 (`injetar_golpes_600`) e acrescenta as megas com moveset próprio. Também monta a árvore de evolução (`e`, `a` e `pedras`, ver `analise/evolucao.py`);
-  - `welcome-dados.json`, gravado pelo robô a cada login (`guardar_welcome`): as 1.043 hunts (nível e espécies com peso) e as constantes de caça.
-- **`Motor`** carrega os dois uma vez (`motor()` recarrega quando os arquivos mudam e limpa o cache). `Motor.xp_h(species_id, nivel, stats, ivs, tipos, nivel_treinador)` devolve a melhor hunt com XP/h, abates/h, segundos de luta por abate e se morre às vezes.
-- **Como fica rápido (~5 ms por Pokémon, contra segundos numa simulação completa):**
-  1. só o nível de agora, sem a trilha nível a nível;
-  2. uma estimativa fechada (`_estimar`) em todas as hunts liberadas, da mais alta para a mais baixa, com corte pelo teto de XP/h de cada hunt;
-  3. a mini-luta (`_hunt`, 16 rolagens de HP, golpe a golpe, saltando os trechos só de Investida) só nas `CANDIDATAS` (8) melhores estimativas.
-- **Medido:** contra a busca que simula todas as hunts, mesma hunt e mesmo número em 300 de 300 casos. Contra a calculadora da comunidade, a mesma hunt em 6 de 6 casos, com XP/h entre −15% e +17%.
+  - `catalogo.json`, montado por `baixar_catalogo()` como o cliente do jogo monta. Junta os quatro `assets/creatures*.json` (a Outland de ids antigos, 10501+, vira 2001+) e as correções (`creatures-audit-overrides.json`). Acerta os tipos trocados (`ajustes-especie-espelho.mjs`, `ler_ajustes_tipos`). Troca os golpes pelos das planilhas de balanceamento (`shared/golpes-planilhas.mjs`, lido por expressão regular em `ler_planilhas`). A Outland pega a planilha própria ou, sem ela, os stats-base e os golpes da espécie nacional do nome (`outland-sprite-dex.mjs`, `ler_dex_outland`). Injeta os golpes de assinatura de poder 600 (`injetar_golpes_600`, com o 2º golpe das tabelas B e reserva pelo nome), copia para Orre (13xxx) os golpes da nacional e monta as megas (3000+dex e 9000+dex) com os tipos e os stats-base da tabela delas (`megas.mjs`, `ler_megas`) e os golpes da planilha das megas ou os da base mais o golpe de mega. Também monta a árvore de evolução (`e`, `a` e `pedras`, ver `analise/evolucao.py`);
+  - `welcome-dados.json`, gravado pelo robô a cada login (`guardar_welcome`): as 1.043 hunts (nível e espécies com peso) e as constantes de caça;
+  - `ritmo.json`, baixado por `baixar_ritmo()` (1 vez por dia, `URL_RITMO`): os segundos por abate de quem mata de um golpe, hunt a hunt (o mapa dela, do simulador do jogo, 3,05 a 3,76 s), como a calculadora publica. Sem o arquivo, a mediana (3,41 s).
+- **`Motor`** carrega os três uma vez (`motor()` recarrega quando os arquivos mudam e limpa o cache). `Motor.xp_h(species_id, nivel, stats, ivs, tipos, nivel_treinador)` devolve a melhor hunt com XP/h, abates/h, segundos de luta por abate e se morre às vezes.
+- **A conta de uma hunt (`_hunt`)**, igual à da calculadora: 32 abates por espécie (IV de HP 1 a 32), golpe a golpe; o tempo morto do mapa encurta com a luta (`tempo_morto`) e a luta é simulada com o tempo morto do mapa e com o piso dele, com o ponto fixo entre as duas por bisseção; poção automática (só morre quem leva o HP inteiro de um golpe; os outros, uma morte a cada 999 abates).
+- **Como fica rápido (~5 ms por Pokémon, contra ~2 s da calculadora):**
+  1. uma estimativa fechada (`_estimar`, com a caminhada acertada pela luta) em todas as hunts liberadas, da mais alta para a mais baixa, com corte pelo teto de XP/h de cada hunt;
+  2. a luta simulada só nas melhores estimativas, da melhor para a pior: no mínimo `CANDIDATAS` (8) e depois enquanto a estimativa da próxima ainda alcança a melhor simulada (até `CANDIDATAS_MAX`, 40). A estimativa erra para mais quando sobra dano, por isso as 8 fixas não bastavam.
+- **Medido (15/11/2026):** Abomasnow Nv 1176 e Furious Scizor Nv 1240 dão o mesmo número da calculadora (75.127.258 e 95.965.537 XP/h). Em 200 anúncios da loja, sem o atalho, a mesma hunt em 200 (p90 da diferença 0,1%); o atalho de agora acerta a mesma hunt que a busca completa em 300 de 300 Pokémon de teste.
 - **`xp_do_anuncio(m, id, ...)`** é o atalho da busca: lê os JSON de `pk_anuncios` e guarda o resultado por (anúncio, nível do treinador).
 
 ### `analise/evolucao.py` (análise de um Pokémon até a evolução final)
@@ -535,6 +536,7 @@ robô atualiza o token sozinho quando o jogo manda `sessao.renovada`.
 | Pré-carga do PvP | a cada 6 h | `robo.PVP_META_A_CADA_MS` |
 | Catálogo de espécies do jogo (XP/h) | 1 vez por dia, 1 s entre arquivos; falhou, tenta em 1 h | `robo.CATALOGO_A_CADA_MS` |
 | Hunts e constantes de caça | a cada login (vêm no `welcome`) | `caca.guardar_welcome` |
+| Ritmo das hunts (segundos por abate de cada mapa, da calculadora) | 1 vez por dia, junto do catálogo; falhou, fica o anterior | `caca.baixar_ritmo` |
 | Ping da sessão | 25 s | `Sessao._pingar` |
 | Reconexão | 1 min dobrando até 10 min; 4001 espera 30 min; erro 5 min | robo |
 | Cache do Tracker | 5 min (você) / 6 h (meta e topo) / 12 h (espécie) | `pvp.TTL_S` |
@@ -609,9 +611,11 @@ Os módulos `shared/` do jogo são públicos (por exemplo, `https://pokeidle.io/
 - **Golpes:**
   - os das planilhas de balanceamento valem desde o nível 1, com recarga pela curva do poder (10 s no poder 15, 30 s no 100, 60 s no 600);
   - toda última evolução ganha um golpe de 600 de cada tipo seu (dois se tiver um tipo só), no lado de ataque mais forte, com 60 s de recarga;
+  - a Outland usa a planilha própria ou os golpes da espécie nacional do nome; Orre (13xxx) usa os da nacional; as megas têm tipos e stats-base próprios (`shared/megas.mjs`) e um golpe de mega (600, 30 s);
   - a Investida (poder 30, 2 s) sai quando nenhum golpe está pronto. O intervalo entre golpes é 0,9 s, e a Investida e o intervalo caem 10 ms por ponto de IV de SPD.
 - **Selvagem:** stats `(base + 2×16) × nível/100`; vida de combate `máx(24, HP × 12) × 5`; dano dele × 1,8, um golpe a cada 1,4 s.
 - **XP do abate:** uma curva só, pelo nível do selvagem: `⌊0,6·n²⌋ + 8` até 150; acima, `13.500 × (n/150)^1,25`.
+- **Ritmo da caça:** quem mata de um golpe leva o tempo do mapa da hunt por abate (3,05 a 3,76 s no simulador do jogo); quem luta mais anda menos: o tempo morto é `s − máx(0; 0,83·s − 1,41) × (1 − e^(−luta/2,8))`. O Hunt Analyser do jogo (`hunt-analyser.mjs`) é outra coisa: XP do abate × abates/h fixos da hunt (3,5 s por bicho + 2,6 s por onda), sem olhar o Pokémon.
 - **Hunt liberada:** nível do treinador ≥ nível da hunt.
 - **PvP e ginásio** (`shared/ginasios.mjs`, `shared/pvp-rank.mjs`): nível de arena = o nível até 150 e `150 × (nível/150)^0,45` acima; o ranqueado pede Nv 150 e times de até 5; ⚔ do PvP = `dps × máx(24, HP × 12) × (DEF + SP.DEF)/2 / 10⁷`. Ver `analise/arena.py`.
 
@@ -625,4 +629,4 @@ Os módulos `shared/` do jogo são públicos (por exemplo, `https://pokeidle.io/
 - **O teto da loja de Pokémon é a página 200:** por isso a varredura faz as passadas do mais barato e do mais caro.
 - **O export vem atrasado:** uma venda pode chegar ao banco até ~1 h depois de acontecer. Contagens das últimas horas sobem com o tempo.
 - **Idle Deck:** as contas de caça do dono rodam lá (é um app fechado). O projeto não automatiza essas contas; o PvP lê só o Tracker público.
-- **Dados do XP/h:** a busca mostra "sem os dados do jogo ainda" até o robô entrar uma vez (hunts) e baixar o catálogo. Se o jogo mudar o formato do `welcome` ou da planilha de golpes, compare com `data/jogo/welcome-esqueleto.json` e com a contagem de `ler_planilhas` (26 tabelas, ~1.100 espécies e ~90 megas em 11/2026).
+- **Dados do XP/h:** a busca mostra "sem os dados do jogo ainda" até o robô entrar uma vez (hunts) e baixar o catálogo. Se o jogo mudar o formato do `welcome` ou da planilha de golpes, compare com `data/jogo/welcome-esqueleto.json` e com a contagem de `ler_planilhas` (26 tabelas, ~1.100 espécies e ~90 megas em 11/2026). O `ritmo.json` vem da calculadora (outro site): se ela mudar o formato, `baixar_ritmo` falha, o robô avisa no log e fica o arquivo anterior.
