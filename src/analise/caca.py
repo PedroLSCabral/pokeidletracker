@@ -82,7 +82,9 @@ ABATES_POR_VIDA_MAX = 999           # quem não morre de um golpe: a calculadora
 # numa baixa de um golpe só.
 MAX_GOLPES_POR_ABATE = 4000
 MAX_LUTA_S = 3000                   # o mesmo limite, pela conta fechada (antes de simular)
-CANDIDATAS = 8                      # hunts que passam da estimativa para a mini-luta
+CANDIDATAS = 8                      # hunts que passam da estimativa para a luta simulada, no mínimo
+CANDIDATAS_MAX = 40                 # e no máximo: depois das 8, só enquanto a estimativa da próxima
+FOLGA_ESTIMATIVA = 1.0              # (÷ esta folga) ainda passa da melhor simulada
 EF_MAXIMA = 5.5                     # 4× (dupla vantagem) ampliado pela caça: 1 + 3 × 1,5
 PADRAO_CONSTS = {"ampliacaoHunt": 1.5, "multHpSelvagem": 5, "multDanoSelvagem": 1.8}
 DIAGONAL = {"FIRE": 0.5, "WATER": 0.5, "ELECTRIC": 0.5, "GRASS": 0.5, "ICE": 0.5, "POISON": 0.5,
@@ -171,12 +173,25 @@ def _baixar_texto(url: str) -> str:
 TIPOS_ELEMENTO = ("NORMAL", "FIRE", "WATER", "GRASS", "ELECTRIC", "ICE", "FIGHTING", "POISON", "GROUND", "FLYING",
                   "PSYCHIC", "BUG", "ROCK", "GHOST", "DRAGON", "DARK", "STEEL", "FAIRY")
 GOLPE_600_CD_MS = 60_000
+# O 2º golpe de 600 de quem tem um só (shared/golpes-especiais.mjs): o da tabela B do tipo, ou o da reserva se
+# a espécie já tem o da B (pelo nome). Só os nomes importam aqui; poder, tipo e recarga são os do 1º.
+GOLPE_600_B = {"NORMAL": "Giga Impact", "FIRE": "Blast Burn", "WATER": "Hydro Cannon", "GRASS": "Frenzy Plant",
+               "ELECTRIC": "Bolt Strike", "ICE": "Glacial Lance", "FIGHTING": "Meteor Assault", "POISON": "Gunk Shot",
+               "GROUND": "Precipice Blades", "FLYING": "Sky Attack", "PSYCHIC": "Prismatic Laser", "BUG": "Megahorn",
+               "ROCK": "Rock Wrecker", "GHOST": "Astral Barrage", "DRAGON": "Roar of Time", "DARK": "Wicked Blow",
+               "STEEL": "Steel Beam", "FAIRY": "Light of Ruin"}
+GOLPE_600_RESERVA = {"NORMAL": "Blood Moon", "FIRE": "Mind Blown", "WATER": "Steam Eruption", "GRASS": "Chloroblast",
+                     "ELECTRIC": "Plasma Fists", "ICE": "Freeze Shock", "FIGHTING": "Combat Torque",
+                     "POISON": "Noxious Torque", "GROUND": "Land's Wrath", "FLYING": "Bleakwind Storm",
+                     "PSYCHIC": "Psycho Boost", "BUG": "Pollen Puff", "ROCK": "Diamond Storm", "GHOST": "Moongeist Beam",
+                     "DRAGON": "Dynamax Cannon", "DARK": "Fiery Wrath", "STEEL": "Make It Rain", "FAIRY": "Fleur Cannon"}
 GOLPE_MEGA_CD_MS = 30_000
 FANTASMA_OUTLAND = range(10_000, 10_501)   # espelhos fantasmas da Outland: não ganham golpe especial
 OUTLAND = range(2001, 2059)                # a Outland com os ids novos (shared/outland.mjs)
 OUTLAND_LEGADO, OUTLAND_DESLOCA = range(10_501, 10_548), 10_501 - 2001   # ids antigos → novos
 ORRE = range(13_000, 14_000)               # clones de Orre: os golpes são os da espécie nacional (id − 13000)
-MODULOS_CATALOGO = ("ajustes-especie-espelho.mjs", "outland-sprite-dex.mjs")
+MODULOS_CATALOGO = ("ajustes-especie-espelho.mjs", "outland-sprite-dex.mjs", "megas.mjs")
+MEGA_BASE, MEGA2_BASE = 3000, 9000          # pokeId da mega: 3000 + dex; a 2ª mega da espécie (X/Z): 9000 + dex
 
 
 def ler_ajustes_tipos(js: str) -> dict:
@@ -184,6 +199,26 @@ def ler_ajustes_tipos(js: str) -> dict:
     m = re.search(r"AJUSTE_TIPOS = \{(.*?)\};", js, re.S)
     return {int(pid): [t1] + ([t2] if t2 else [])
             for pid, t1, t2 in re.findall(r"(\d+):\s*\['(\w+)'(?:\s*,\s*'(\w+)')?\]", m.group(1) if m else "")}
+
+
+def ler_megas(js: str) -> list[dict]:
+    """As megas de shared/megas.mjs (`MEGAS` e `MEGAS_SEGUNDAS`): pokeId, espécie base, nome, tipos e stats-base
+    da mega (criarEspeciesMega). A base é `base` se a entrada tem, senão o dex."""
+    saida = []
+    for lista, base_id in (("MEGAS", MEGA_BASE), ("MEGAS_SEGUNDAS", MEGA2_BASE)):
+        m = re.search(r"^export const " + lista + r" = \[(.*?)^\];", js, re.S | re.M)
+        for bloco in re.split(r"\n\s*\},", m.group(1) if m else ""):
+            dex, nome = re.search(r"\bdex:\s*(\d+)", bloco), re.search(r"\bnome:\s*'([^']*)'", bloco)
+            tipos = re.search(r"\btipos:\s*\[([^\]]*)\]", bloco)
+            bases = re.search(r"\bbases:\s*\{([^}]*)\}", bloco)
+            if not (dex and nome and tipos and bases):
+                continue
+            b = dict(re.findall(r"(\w+):\s*(\d+)", bases.group(1)))
+            base = re.search(r"\bbase:\s*(\d+)", bloco)
+            saida.append({"pid": base_id + int(dex.group(1)), "base": int(base.group(1) if base else dex.group(1)),
+                          "nome": nome.group(1), "tipos": re.findall(r"'(\w+)'", tipos.group(1)),
+                          "b": [int(b.get(k, 0)) for k in ("hp", "atk", "def", "spAtk", "spDef", "speed")]})
+    return saida
 
 
 def ler_dex_outland(js: str) -> tuple[list[str], dict]:
@@ -217,7 +252,11 @@ def injetar_golpes_600(c: dict) -> None:
             golpes.append({"power": 600, "type": t, "category": cat, "cooldownMs": GOLPE_600_CD_MS, "learnLevel": 1})
     de600 = [a for a in golpes if (a.get("power") or 0) >= 600]
     if len(de600) == 1:
-        golpes.append({**de600[0], "category": cat, "learnLevel": 1})
+        nomes = {a.get("name") for a in golpes}
+        b = next((n for n in (GOLPE_600_B.get(de600[0].get("type")), GOLPE_600_RESERVA.get(de600[0].get("type")))
+                  if n and n not in nomes), None)
+        if b:
+            golpes.append({**de600[0], "name": b, "category": cat, "learnLevel": 1})
     c["attacks"] = golpes
 
 
@@ -250,7 +289,7 @@ def ler_planilhas(js: str) -> tuple[list[dict], set, dict, dict, set]:
             golpes = []
             for _q, _nome, tipo, cat, poder, marca in _RE_GOLPE.findall(linhas):
                 poder = int(poder)
-                g = {"power": poder, "type": tipo, "category": cat, "learnLevel": 1,
+                g = {"name": _nome, "power": poder, "type": tipo, "category": cat, "learnLevel": 1,
                      "cooldownMs": GOLPE_MEGA_CD_MS if marca == "MEGA" else cooldown_do_poder(poder)}
                 if poder >= 600 or marca == "MEGA":
                     g["categoriaFixa"] = True
@@ -316,6 +355,12 @@ def baixar_catalogo() -> int:
     except Exception as e:  # noqa: BLE001
         print(f"catálogo: sem os acertos de tipos e da Outland ({e!r})", flush=True)
         ajustes_tipos, prefixos_outland, dex_outland = {}, [], {}
+    try:
+        time.sleep(1)
+        tabela_megas = ler_megas(_baixar_texto(URL_SHARED + MODULOS_CATALOGO[2]))
+    except Exception as e:  # noqa: BLE001
+        print(f"catálogo: sem a tabela das megas ({e!r})", flush=True)
+        tabela_megas = []
     for pid, tipos in ajustes_tipos.items():        # aplicarAjustesTipos, antes de tudo que lê o tipo
         if pid in especies:
             especies[pid]["type1"], especies[pid]["type2"] = tipos[0], (tipos[1:] or [None])[0]
@@ -391,12 +436,22 @@ def baixar_catalogo() -> int:
             ds = evolucao.destinos(c, especies, tabelas)
             if ds:
                 saida[pid]["e"] = ds
-    # Megas com moveset próprio (planilha das megas): os stats-base vêm da forma base; os tipos, do anúncio.
-    for pid, golpes in megas.items():
-        base = saida.get(pid % 1000)
-        if base and pid not in saida:
-            saida[pid] = {**{k: v for k, v in base.items() if k not in ("e", "a")}, "n": f"Mega {base['n']}", "mega": True,
-                          "g": [[g["power"], g["type"], 0 if g["category"] == "SPECIAL" else 1, g["cooldownMs"], 1] for g in golpes]}
+    # As megas (criarEspeciesMega): nome, tipos e stats-base da tabela das megas; os golpes, os da planilha das
+    # megas ou, sem ela, os da forma base (já com os de 600) mais o golpe de mega (600, 30 s, do 1º tipo da mega,
+    # no lado de ataque mais forte dela). Sem a tabela, só as megas da planilha, com os stats da forma base.
+    linha = lambda g: [g["power"], g["type"], 0 if g["category"] == "SPECIAL" else 1, g["cooldownMs"], 1]  # noqa: E731
+    metas = tabela_megas or [{"pid": pid, "base": pid % 1000, "nome": None, "tipos": None, "b": None} for pid in megas]
+    for meta in metas:
+        base, pid = saida.get(meta["base"]), meta["pid"]
+        if not base:
+            continue
+        b, tipos = meta["b"] or base["b"], meta["tipos"] or base["t"]
+        if pid in megas:
+            golpes = [linha(g) for g in megas[pid]]
+        else:
+            golpes = base["g"] + [[600, tipos[0], 1 if b[1] >= b[3] else 0, GOLPE_MEGA_CD_MS, 1]]
+        saida[pid] = {**{k: v for k, v in base.items() if k not in ("e", "a")}, "n": meta["nome"] or f"Mega {base['n']}",
+                      "t": tipos, "b": b, "g": golpes, "mega": True}
     caminhos.JOGO.mkdir(parents=True, exist_ok=True)
     _gravar_json(caminhos.CATALOGO_JOGO, {"salvo_ms": int(time.time() * 1000), "especies": saida,
                                           "pedras": (tabelas or {}).get("pedras") or {}})
@@ -527,26 +582,30 @@ class Motor:
         por_tipos: dict = {}
         args = (golpes, tipos, fator_nivel, atk, spa, dfs, spd_, hp_pk, gap, cd_inv, por_tipos)
         # 1) Estimativa barata em todas as hunts liberadas, da mais alta para a mais baixa; guarda as
-        #    CANDIDATAS melhores. Para quando nem o teto de uma hunt (abates/h
+        #    CANDIDATAS_MAX melhores. Para quando nem o teto de uma hunt (abates/h
         #    máximos × XP do abate) alcança a pior das guardadas.
         cands: list = []                    # heap de (estimativa, ordem, hunt)
         for n_h, h in enumerate(self.hunts):
             if nivel_treinador and h["nivel"] > nivel_treinador:
                 continue
-            if len(cands) >= CANDIDATAS and teto_kph * h["xp"] <= cands[0][0]:
+            if len(cands) >= CANDIDATAS_MAX and teto_kph * h["xp"] <= cands[0][0]:
                 break
             if any(max(m["hps"]) / (((k_teto / m["d_min"]) / 50 + 2) * fator_teto) > MAX_GOLPES_POR_ABATE for m in h["mobs"]):
                 continue                    # não mata nem com o golpe mais forte e a melhor vantagem de tipo
             est = self._estimar(h, *args)
             if est is None:
                 continue
-            if len(cands) < CANDIDATAS:
+            if len(cands) < CANDIDATAS_MAX:
                 heapq.heappush(cands, (est, n_h, h))
             elif est > cands[0][0]:
                 heapq.heapreplace(cands, (est, n_h, h))
-        # 2) A mini-luta só nas candidatas: é ela que dá o número.
+        # 2) A luta simulada nas candidatas, da melhor estimativa para a pior: é ela que dá o número. Depois das
+        #    CANDIDATAS primeiras, para quando a estimativa da próxima já não alcança a melhor simulada (a
+        #    estimativa erra para mais quando sobra dano: um golpe forte num selvagem quase morto).
         melhor = None
-        for _est, _n, h in cands:
+        for i, (est, _n, h) in enumerate(sorted(cands, reverse=True, key=lambda c: (c[0], -c[1]))):
+            if i >= CANDIDATAS and melhor and est <= melhor["xp_h"] * FOLGA_ESTIMATIVA:
+                break
             r = self._hunt(h, *args)
             if r and (melhor is None or r["xp_h"] > melhor["xp_h"]):
                 melhor = r
@@ -581,8 +640,9 @@ class Motor:
         (luta + caminhada) ÷ recarga vezes (a recarga corre também entre um abate e outro) e a Investida sai
         1 + luta ÷ passo vezes. Igualando o dano ao HP médio do selvagem, a luta sai de uma conta de 1º grau:
         luta = (HP − Investida − caminhada·ritmo dos golpes) ÷ (ritmo dos golpes + Investida ÷ passo).
-        Não conta as mortes; a mini-luta das candidatas conta."""
-        luta = 0.0
+        A caminhada encurta com a luta (`tempo_morto`): três voltas acertam as duas. Não conta as mortes; a
+        luta simulada das candidatas conta."""
+        termos = []                         # (peso, HP que falta sem a caminhada, ritmo dos golpes, ritmo)
         for m in h["mobs"]:
             st = m["st"]
             _qs, q_inv, extra_inv, soma = self._golpes_contra(golpes, tipos, m["t"], por_tipos)
@@ -592,9 +652,12 @@ class Motor:
             ritmo = k_fis * soma[3] + k_esp * soma[4] + soma[5] + d_inv / max(gap, cd_inv)
             if ritmo <= 0 or (max(m["hps"]) - abertura) / ritmo > MAX_LUTA_S:
                 return None
-            ritmo_golpes = ritmo - d_inv / max(gap, cd_inv)
-            luta += m["w"] * max(0.0, (m["hp_medio"] - d_inv - h["s"] * ritmo_golpes) / ritmo)
-        return h["xp"] * 3600 / (tempo_morto(h["s"], luta) + luta)
+            termos.append((m["w"], m["hp_medio"] - d_inv, ritmo - d_inv / max(gap, cd_inv), ritmo))
+        caminhada = h["s"]
+        for _ in range(3):
+            luta = sum(w * max(0.0, (falta - caminhada * rg) / r) for w, falta, rg, r in termos)
+            caminhada = tempo_morto(h["s"], luta)
+        return h["xp"] * 3600 / (caminhada + luta)
 
     def _hunt(self, h, golpes, tipos, fator_nivel, atk, spa, dfs, spd_, hp_pk, gap, cd_inv, por_tipos):
         """XP/h numa hunt pela mini-luta, ou None se ele não mata."""

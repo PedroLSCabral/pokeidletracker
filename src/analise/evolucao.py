@@ -406,7 +406,7 @@ def analisar(ficha: dict, nivel_treinador: int | None = None, nivel_alvo: int | 
 
     nota0 = nota_pokemon(ivs, q, pot, shiny, tuple(esp0["b"]), arv.ancestrais(sid))
     if esp0.get("mega") and ficha.get("nota") is not None:
-        nota0 = ficha["nota"]   # o catálogo não tem as bases próprias das megas: vale a nota do jogo
+        nota0 = ficha["nota"]   # mega: vale a nota que o jogo mostra (a conta dela tem regras próprias)
     atual = forma(sid, L0, ficha.get("nota") or nota0) | {
         "nota": nota0, "faixa": faixa_da_nota(nota0), "nota_jogo": ficha.get("nota"), "poder_jogo": ficha.get("poder")}
 
