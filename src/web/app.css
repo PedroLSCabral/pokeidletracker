@@ -495,3 +495,15 @@ input[type="checkbox"]:focus-visible { outline: 2px solid var(--rx-rosa); outlin
 .pkv-tab { margin: 4px 0 0; }
 .pkv-outra { opacity: .8; }
 .tabela tr.pkv-melhor td { background: rgba(231, 122, 210, .22); font-weight: 700; }
+
+/* ---------- volume por faixa de preço e estoque da loja ---------- */
+.titulo-linha { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; padding-right: 4px; }
+.titulo-linha .titulo-mini { padding-bottom: 0; }
+.titulo-linha .legenda { padding: 8px 0 0; }
+.legenda .leg-f { padding: 0 4px; }
+.legenda .leg-f .sw { height: 10px; width: 10px; vertical-align: -1px; margin-right: 4px; }
+.modo-vol { display: flex; gap: 4px; margin-left: auto; padding-top: 6px; }
+.modo-vol .chip { min-height: 22px; padding: 3px 8px; font-size: 11px; }
+.grafico g.col.ativo rect { filter: brightness(1.35); }
+.tooltip .faixas-tip { margin: 2px 0 2px 2px; }
+.tooltip .faixas-tip .sw { width: 8px; height: 8px; }

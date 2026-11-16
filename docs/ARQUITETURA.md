@@ -307,8 +307,8 @@ Todas as rotas GET aceitam `moeda=gems|coins` (o padrão é gems).
 | Rota | Função | O que devolve |
 |---|---|---|
 | `GET /api/resumo` | `api_resumo` | Lista do mercado: mediana atual, variação de 24 h e 7 d, vendas de 24 h, menor anúncio e mini gráfico de 7 dias |
-| `GET /api/item?nome=&janela=24h\|7d\|30d\|tudo` | `api_item` | Detalhe: estatísticas, série do gráfico (baldes), menor anúncio no tempo, vitrine e últimas vendas |
-| `GET /api/item/serie?nome=&janela=&de=&ate=` | `api_item_serie` | Zoom do gráfico: a série de `[de, ate]` (ms) com baldes mais finos (até 5 min), o menor anúncio no trecho e o resumo (mediana, vendas, unidades). As suspeitas seguem a mediana da janela inteira |
+| `GET /api/item?nome=&janela=24h\|7d\|30d\|tudo` | `api_item` | Detalhe: estatísticas, série do gráfico (baldes, com `por_faixa`), `faixas` de preço, menor anúncio no tempo, `estoque` da loja por balde (com as entradas estimadas), `vendas_ate`, vitrine e últimas vendas |
+| `GET /api/item/serie?nome=&janela=&de=&ate=` | `api_item_serie` | Zoom do gráfico: a série de `[de, ate]` (ms) com baldes mais finos (até 5 min), o menor anúncio e o estoque no trecho e o resumo (mediana, vendas, unidades). As suspeitas e as `faixas` de preço seguem a janela inteira |
 | `GET /api/montagem` | `api_montagem` | Fragmentos × casa/bicicleta pronta (valor esperado por raridade) |
 | `GET /api/venda?nome=&qtd=` | `api_venda` → `venda.analisar` | Botão vender: moeda, preços, momento e montagem |
 | `GET /api/sinais` | `api_sinais` → `sinais.calcular` | Revenda, barato/caro, regras, log de alertas e canais |
@@ -509,6 +509,8 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
     - o eixo do tempo marca horas redondas de Brasília (`marcasTempo`), com a meia-noite mais forte; o servidor alinha os baldes do mesmo jeito (`_baldes`);
     - a linha da mediana só quebra depois de 3 h sem venda (ou de um balde vazio, se o balde for maior);
     - com mais de 240 fotos da vitrine, o servidor (`_anuncios`) manda uma por meio balde, a de valor mediano;
+    - **volume por faixa de preço:** as barras de unidades vendidas são empilhadas por faixa (`_faixas_preco`: até 5 preços distintos, um por faixa; em gemas, um preço por faixa no miolo e as pontas juntas; acima disso, quintis arredondados). As cores são uma rampa azul (`RAMPA_FAIXAS`, da mais barata à mais cara) e não mudam no zoom. O botão "% do período" (`graf.pct`, lembrado em `graf_vol_pct`) leva cada barra a 100% para ver a troca de preço;
+    - **estoque da loja:** `_estoque` dá, por balde, as unidades anunciadas na última foto da vitrine e as **entradas estimadas** = estoque agora − estoque do balde anterior + vendidas no meio (as duas moedas). Depois da última venda importada (`vendas_ate`) e nos buracos do export (`gap_before`, ver `_cobertura`), a conta fica `None` e o gráfico mostra só um traço. Entrada negativa = saiu sem venda (cancelado ou vencido);
   - **montagem:** `carregarMontagem`;
   - **vender:** `abrirVenda`, `desenharVenda`, `ligarVenda` e o estado em `venda`;
   - **sinais:** `carregarSinais`, `desenharSinais`, `ligarSinais`; `postar()` para os POST;

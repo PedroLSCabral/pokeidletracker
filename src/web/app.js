@@ -194,8 +194,16 @@ function desenharDetalhe(d) {
         <div class="zoom" id="g-zoom"></div>
       </div>
       <div class="grafico" id="g-preco"></div>
-      <div class="titulo-mini">Unidades vendidas</div>
+      <div class="titulo-linha">
+        <div class="titulo-mini">Unidades vendidas por preço</div>
+        <div class="legenda" id="g-leg-faixas"></div>
+        <div class="modo-vol" id="g-modo-vol"></div>
+      </div>
       <div class="grafico" id="g-vol"></div>
+      <div class="titulo-mini">Na loja: unidades anunciadas</div>
+      <div class="grafico" id="g-est"></div>
+      <div class="titulo-mini">Entrando na loja (estimativa: estoque novo − anterior + vendidas)</div>
+      <div class="grafico" id="g-ent"></div>
       <div class="aviso" id="g-aviso"></div>
     </div>
     <div class="duas-col">
@@ -256,6 +264,7 @@ const graf = {
   pilha: [],      // zooms empilhados: {de, ate, passo, serie, anuncios, resumo, carregando}
   fixo: null,     // t (início do balde) do ponto fixado
   ocultas: new Set(), // séries escondidas pela legenda (lembradas no localStorage)
+  pct: false,     // volume em % do balde (mostra a troca de 3 para 4 sem o tamanho do balde atrapalhar)
   v: null,        // a vista desenhada agora (escalas e pontos), usada pelos eventos
 };
 
@@ -281,25 +290,32 @@ function marcasTempo(x0, x1, maxMarcas) {
 
 function vistaGrafico(d) {
   const z = graf.pilha[graf.pilha.length - 1];
-  if (z) return { x0: z.de, x1: z.ate, serie: z.serie, anun: z.anuncios.filter((a) => a.min != null), passo: z.passo, zoom: z };
-  return { x0: d.inicio, x1: d.agora, serie: d.serie, anun: d.anuncios.filter((a) => a.min != null), passo: d.passo, zoom: null };
+  if (z) return { x0: z.de, x1: z.ate, serie: z.serie, anun: z.anuncios.filter((a) => a.min != null), passo: z.passo, zoom: z, estoque: z.estoque || [] };
+  return { x0: d.inicio, x1: d.agora, serie: d.serie, anun: d.anuncios.filter((a) => a.min != null), passo: d.passo, zoom: null, estoque: d.estoque || [] };
 }
+
+// Faixas de preço do volume: rampa de um tom só (azul), da mais barata (escura) à mais cara (clara).
+// O servidor manda as mesmas faixas no zoom, então a cor de "4" não muda ao dar zoom.
+const RAMPA_FAIXAS = ['#1f6cb0', '#418ad1', '#60aaf3', '#80caff', '#bfe6ff'];
+const corFaixa = (i, n) => RAMPA_FAIXAS[n <= 1 ? 2 : Math.round((i * (RAMPA_FAIXAS.length - 1)) / (n - 1))];
 
 function desenharGraficos(d) {
   const chave = `${d.nome}|${d.moeda}|${d.janela}`;
   if (graf.chave !== chave) { graf.chave = chave; graf.pilha = []; graf.fixo = null; }
-  const gp = $('#g-preco'), gv = $('#g-vol');
+  const gp = $('#g-preco'), gv = $('#g-vol'), ge = $('#g-est'), gn = $('#g-ent');
   if (!gp) return;
   const W = Math.max(320, gp.clientWidth);
-  const H = 270, HV = 70;
+  const H = 270, HV = 110, HE = 80, HN = 64;
   const m = { l: 62, r: 84, t: 10, b: 24 };
-  const { x0, x1, serie, anun, passo, zoom } = vistaGrafico(d);
+  const { x0, x1, serie, anun, passo, zoom, estoque } = vistaGrafico(d);
+  const faixas = d.faixas || [];
   const moeda = d.moeda;
   const ver = (k) => !graf.ocultas.has(k);
   desenharBarraGrafico(d, zoom, passo);
   if (!serie.length && !anun.length) {
     gp.innerHTML = `<div class="vazio">${zoom ? 'Sem vendas neste trecho. Volte o zoom.' : 'Sem vendas nesta janela. Tente uma janela maior.'}</div>`;
-    gv.innerHTML = ''; $('#g-aviso').textContent = '';
+    gv.innerHTML = ''; ge.innerHTML = ''; gn.innerHTML = ''; $('#g-aviso').textContent = '';
+    $('#g-leg-faixas').innerHTML = ''; $('#g-modo-vol').innerHTML = '';
     graf.v = null;
     return;
   }
@@ -404,26 +420,96 @@ function desenharGraficos(d) {
   svg += `<rect class="alvo" x="${m.l}" y="0" width="${pw}" height="${H}" fill="transparent"/>`;
   gp.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Preço de ${esc(d.nome)} ao longo do tempo">${svg}</svg>`;
 
-  // Volume: gráfico separado (nunca dois eixos no mesmo gráfico).
-  const maxU = Math.max(1, ...serie.map((s) => s.unidades));
+  // Volume: gráfico separado (nunca dois eixos no mesmo gráfico), empilhado por faixa de preço,
+  // a mais barata embaixo. Em "%" cada barra vai a 100%: dá para ver o 4 tomando o lugar do 3.
+  const nf_ = faixas.length;
+  const pct = graf.pct && nf_ > 1;
+  const maxU = pct ? 100 : Math.max(1, ...serie.map((s) => s.unidades));
   let sv = `<line x1="${m.l}" x2="${W - m.r}" y1="${HV - 2}" y2="${HV - 2}" stroke="var(--grade)"/>`;
-  sv += `<text x="${m.l - 8}" y="14" text-anchor="end">${nf(0).format(maxU)}</text><text x="${m.l - 8}" y="${HV - 2}" text-anchor="end">0</text>`;
-  for (const mk of marcas) sv += `<line x1="${X(mk.t)}" x2="${X(mk.t)}" y1="4" y2="${HV - 2}" stroke="var(--grade)" ${mk.forte ? '' : 'stroke-dasharray="2 4"'}/>`;
+  sv += `<text x="${m.l - 8}" y="14" text-anchor="end">${pct ? '100%' : nf(0).format(maxU)}</text><text x="${m.l - 8}" y="${HV - 2}" text-anchor="end">0</text>`;
+  if (pct) sv += `<line x1="${m.l}" x2="${W - m.r}" y1="${HV - 2 - (HV - 8) / 2}" y2="${HV - 2 - (HV - 8) / 2}" stroke="var(--grade)" stroke-dasharray="2 4"/><text x="${m.l - 8}" y="${HV - (HV - 8) / 2 + 2}" text-anchor="end">50%</text>`;
+  const gradeT = (h0, h1) => marcas.map((mk) => `<line x1="${X(mk.t)}" x2="${X(mk.t)}" y1="${h0}" y2="${h1}" stroke="var(--grade)" ${mk.forte ? '' : 'stroke-dasharray="2 4"'}/>`).join('');
+  sv += gradeT(4, HV - 2);
   serie.forEach((s, i) => {
-    const xa = X(s.t) + 1, xb = X(Math.min(s.fim, x1)) - 1;
-    const h = (s.unidades / maxU) * (HV - 8);
-    sv += `<rect data-i="${i}" x="${xa}" y="${HV - 2 - h}" width="${Math.max(2, xb - xa)}" height="${Math.max(1, h)}" fill="var(--serie-1)"/>`;
+    const xa = X(s.t) + 1, xb = X(Math.min(s.fim, x1)) - 1, w = Math.max(2, xb - xa);
+    const partes = s.por_faixa && nf_ > 1 ? s.por_faixa : [s.unidades];
+    const tot = partes.reduce((a, b) => a + b, 0) || 1;
+    let y = HV - 2;
+    sv += `<g class="col" data-i="${i}">`;
+    partes.forEach((u, k) => {
+      if (!u) return;
+      const h = ((pct ? (u / tot) * 100 : u) / maxU) * (HV - 8);
+      // 1 px de vão entre as faixas, quando a barra tem altura para isso.
+      const gap = h > 3 && y < HV - 2 ? 1 : 0;
+      sv += `<rect x="${xa}" y="${y - h + gap}" width="${w}" height="${Math.max(1, h - gap)}" fill="${nf_ > 1 ? corFaixa(k, nf_) : 'var(--serie-1)'}"/>`;
+      y -= h;
+    });
+    sv += '</g>';
   });
-  sv += `<line id="mira-v" x1="0" x2="0" y1="0" y2="${HV}" stroke="var(--tinta-3)" visibility="hidden"/>`;
-  sv += `<rect id="g-sel-v" y="0" height="${HV}" fill="var(--tinta)" opacity=".12" visibility="hidden"/>`;
+  const miraV = (h) => `<line class="mira-v" x1="0" x2="0" y1="0" y2="${h}" stroke="var(--tinta-3)" visibility="hidden"/>`
+    + `<rect class="g-sel-v" y="0" height="${h}" fill="var(--tinta)" opacity=".12" visibility="hidden"/>`;
+  sv += miraV(HV);
   sv += `<rect class="alvo" x="${m.l}" y="0" width="${pw}" height="${HV}" fill="transparent"/>`;
-  gv.innerHTML = `<svg viewBox="0 0 ${W} ${HV}" height="${HV}" role="img" aria-label="Unidades vendidas por período">${sv}</svg>`;
+  gv.innerHTML = `<svg viewBox="0 0 ${W} ${HV}" height="${HV}" role="img" aria-label="Unidades vendidas por período e faixa de preço">${sv}</svg>`;
+  $('#g-leg-faixas').innerHTML = nf_ > 1 ? faixas.map((f, k) => `<span class="leg-f"><span class="sw" style="background:${corFaixa(k, nf_)}"></span>${esc(f.rot)}</span>`).join('') : '';
+  $('#g-modo-vol').innerHTML = nf_ > 1 ? `<button class="chip ${pct ? '' : 'ativa'}" data-modo-vol="un" aria-pressed="${!pct}">unidades</button><button class="chip ${pct ? 'ativa' : ''}" data-modo-vol="pct" aria-pressed="${pct}">% do período</button>` : '';
+
+  // Estoque da loja: unidades anunciadas na última foto de cada balde (escala própria, sem começar no zero,
+  // porque o que importa é a variação). Abaixo, as unidades que entraram (estimativa).
+  const est = estoque.filter((e) => e.t < x1 && e.fim > x0);
+  let se = gradeT(4, HE - 18);
+  let sn = '';
+  if (est.length) {
+    let eLo = Math.min(...est.map((e) => e.estoque)), eHi = Math.max(...est.map((e) => e.estoque));
+    if (eLo === eHi) { eLo = eLo * 0.95; eHi = eHi * 1.05 || 1; }
+    const pE = passoBonito((eHi - eLo) / 3);
+    eLo = Math.max(0, Math.floor(eLo / pE) * pE); eHi = Math.ceil(eHi / pE) * pE;
+    const YE = (v) => 6 + (1 - (v - eLo) / (eHi - eLo)) * (HE - 26);
+    for (const v of [eLo, eHi]) se += `<line x1="${m.l}" x2="${W - m.r}" y1="${YE(v)}" y2="${YE(v)}" stroke="var(--grade)"/><text x="${m.l - 8}" y="${YE(v) + 4}" text-anchor="end">${nf(0).format(v)}</text>`;
+    const trE = [];
+    est.forEach((e, i) => { if (!i || e.t - est[i - 1].fim > Math.max(passo, 30 * 60_000)) trE.push([]); trE[trE.length - 1].push(e); });
+    for (const tr of trE) {
+      if (tr.length > 1) se += `<path d="M${tr.map((e) => `${centro(e)} ${YE(e.estoque)}`).join(' L')}" fill="none" stroke="var(--tinta-2)" stroke-width="2" stroke-linejoin="round" shape-rendering="geometricPrecision"/>`;
+      else se += `<circle cx="${centro(tr[0])}" cy="${YE(tr[0].estoque)}" r="3" fill="var(--tinta-2)"/>`;
+    }
+    const ult = est[est.length - 1];
+    se += `<text class="rotulo-dir" x="${W - m.r + 8}" y="${YE(ult.estoque) + 4}">${nf(0).format(ult.estoque)}</text>`;
+    se += `<circle id="mira-e" r="5" fill="none" stroke="var(--tinta)" stroke-width="2" visibility="hidden"/>`;
+    graf.YE = YE;
+
+    // Entradas: barra para cima = anúncios novos; para baixo = saiu sem venda (cancelado ou vencido).
+    const ents = est.filter((e) => e.entradas != null);
+    const nLo = Math.min(0, ...ents.map((e) => e.entradas)), nHi = Math.max(1, ...ents.map((e) => e.entradas));
+    const YN = (v) => 4 + (1 - (v - nLo) / (nHi - nLo)) * (HN - 8);
+    sn += gradeT(4, HN - 4);
+    sn += `<line x1="${m.l}" x2="${W - m.r}" y1="${YN(0)}" y2="${YN(0)}" stroke="var(--grade)"/>`;
+    sn += `<text x="${m.l - 8}" y="14" text-anchor="end">${nf(0).format(nHi)}</text>`;
+    if (nLo < 0) sn += `<text x="${m.l - 8}" y="${HN - 2}" text-anchor="end">${nf(0).format(nLo)}</text>`;
+    else sn += `<text x="${m.l - 8}" y="${YN(0)}" text-anchor="end">0</text>`;
+    est.forEach((e) => {
+      const xa = X(e.t) + 1, xb = X(Math.min(e.fim, x1)) - 1, w = Math.max(2, xb - xa);
+      if (e.entradas == null) {
+        // Sem conta possível (vendas ainda não importadas, foto ou export faltando): só um traço apagado.
+        sn += `<rect x="${xa}" y="${YN(0) - 1}" width="${w}" height="2" fill="var(--grade)"/>`;
+        return;
+      }
+      const ya = YN(Math.max(0, e.entradas)), yb = YN(Math.min(0, e.entradas));
+      sn += `<rect data-t="${e.t}" x="${xa}" y="${ya}" width="${w}" height="${Math.max(1, yb - ya)}" fill="${e.entradas >= 0 ? 'var(--tinta-2)' : 'var(--tinta-3)'}" opacity="${e.entradas >= 0 ? 1 : 0.6}"/>`;
+    });
+  } else {
+    se += `<text x="${m.l + pw / 2}" y="${HE / 2}" text-anchor="middle">sem fotos da vitrine neste trecho</text>`;
+  }
+  se += miraV(HE) + `<rect class="alvo" x="${m.l}" y="0" width="${pw}" height="${HE}" fill="transparent"/>`;
+  sn += miraV(HN) + `<rect class="alvo" x="${m.l}" y="0" width="${pw}" height="${HN}" fill="transparent"/>`;
+  ge.innerHTML = `<svg viewBox="0 0 ${W} ${HE - 14}" height="${HE - 14}" role="img" aria-label="Unidades anunciadas na loja ao longo do tempo">${se}</svg>`;
+  gn.innerHTML = est.length ? `<svg viewBox="0 0 ${W} ${HN}" height="${HN}" role="img" aria-label="Unidades que entraram na loja por período (estimativa)">${sn}</svg>` : '';
 
   const buracos = trechos.length - 1;
   $('#g-aviso').textContent = `Cada ponto = ${rotPasso(passo)}.` + (buracos > 0 ? ` A linha se interrompe onde ficou muito tempo sem venda (${buracos} intervalo(s)).` : '')
+    + (d.vendas_ate ? ` Vendas importadas até ${fDiaHora.format(d.vendas_ate)} (o export é de hora em hora); depois disso as entradas ficam sem conta.` : '')
     + (zoom?.carregando ? ' Carregando o trecho em detalhe…' : '');
 
-  graf.v = { d, W, H, m, pw, x0, x1, serie, anun, passo, X, Y, centro, moeda };
+  graf.v = { d, W, H, m, pw, x0, x1, serie, anun, passo, X, Y, centro, moeda, faixas, est };
   ligarGrafico();
   if (graf.fixo != null) {
     const i = serie.findIndex((s) => s.t === graf.fixo);
@@ -463,8 +549,7 @@ function ligarGrafico() {
   const xParaT = (x) => v.x0 + ((Math.min(Math.max(x, v.m.l), v.m.l + v.pw) - v.m.l) / v.pw) * (v.x1 - v.x0);
   let arrasto = null;
   const sel = (a, b) => {
-    for (const id of ['#g-sel', '#g-sel-v']) {
-      const el = $(id);
+    for (const el of $$('#g-sel, .g-sel-v')) {
       if (a == null) { el.setAttribute('visibility', 'hidden'); continue; }
       const xa = Math.max(v.m.l, Math.min(a, b)), xb = Math.min(v.m.l + v.pw, Math.max(a, b));
       el.setAttribute('x', xa); el.setAttribute('width', Math.max(0, xb - xa)); el.setAttribute('visibility', 'visible');
@@ -510,8 +595,9 @@ function pontoMaisPerto(t) {
 function esconderMira() {
   $('#tooltip').classList.add('hidden');
   $('#mira-g')?.setAttribute('visibility', 'hidden');
-  $('#mira-v')?.setAttribute('visibility', 'hidden');
-  $$('#g-vol rect.ativo').forEach((r) => r.classList.remove('ativo'));
+  $$('.mira-v').forEach((el) => el.setAttribute('visibility', 'hidden'));
+  $('#mira-e')?.setAttribute('visibility', 'hidden');
+  $$('.grafico .ativo').forEach((r) => r.classList.remove('ativo'));
 }
 
 // Mostra o balde i (ou só o anúncio mais perto de t, se não há venda ali).
@@ -531,7 +617,7 @@ function mostrarPonto(i, ev, t) {
   const xm = s ? v.centro(s) : v.X(a.t);
   const ym = s ? v.Y(s.mediana) : v.Y(a.min);
   $('#mira-g').setAttribute('visibility', 'visible');
-  for (const id of ['#mira', '#mira-v']) { const el = $(id); el.setAttribute('x1', xm); el.setAttribute('x2', xm); el.setAttribute('visibility', 'visible'); }
+  for (const el of $$('#mira, .mira-v')) { el.setAttribute('x1', xm); el.setAttribute('x2', xm); el.setAttribute('visibility', 'visible'); }
   const mh = $('#mira-h'); mh.setAttribute('y1', ym); mh.setAttribute('y2', ym);
   const p = $('#mira-p'), pa = $('#mira-a');
   p.setAttribute('visibility', s ? 'inherit' : 'hidden');
@@ -544,8 +630,18 @@ function mostrarPonto(i, ev, t) {
   const xe = Math.min(Math.max(xm, v.m.l + 44), v.W - v.m.r + 40);
   ex.setAttribute('transform', `translate(${xe} 0)`);
   ex.querySelector('text').textContent = fDiaHora.format(s ? s.t : a.t);
-  $$('#g-vol rect.ativo').forEach((r) => r.classList.remove('ativo'));
-  if (s) $(`#g-vol rect[data-i="${i}"]`)?.classList.add('ativo');
+  $$('.grafico .ativo').forEach((r) => r.classList.remove('ativo'));
+  if (s) $(`#g-vol g.col[data-i="${i}"]`)?.classList.add('ativo');
+  // Estoque do mesmo balde (ou da foto mais perto, se os baldes não baterem).
+  let e = null, de_ = Infinity;
+  for (const x of v.est) { const dd = Math.abs((x.t + x.fim) / 2 - tRef); if (dd < de_) { de_ = dd; e = x; } }
+  if (e && de_ > v.passo) e = null;
+  const me = $('#mira-e');
+  if (me) {
+    me.setAttribute('visibility', e && graf.YE ? 'visible' : 'hidden');
+    if (e && graf.YE) { me.setAttribute('cx', v.centro(e)); me.setAttribute('cy', graf.YE(e.estoque)); }
+  }
+  if (e) $(`#g-ent rect[data-t="${e.t}"]`)?.classList.add('ativo');
 
   let h = '';
   if (s) {
@@ -556,12 +652,23 @@ function mostrarPonto(i, ev, t) {
       + (varr != null && Math.abs(varr) >= 0.05 ? ` <span class="var ${varr > 0 ? 'sobe' : 'desce'}">${varr > 0 ? '▲' : '▼'} ${nf(1).format(Math.abs(varr))}%</span>` : '') + '</div>';
     h += `<div>faixa <b>${fmtNum(s.min, moeda)} – ${fmtNum(s.max, moeda)}</b></div>`;
     h += `<div>${nf(0).format(s.vendas)} vendas · ${nf(0).format(s.unidades)} un.</div>`;
+    if (s.por_faixa && v.faixas.length > 1) {
+      // Uma linha por faixa que vendeu, da mais cara para a mais barata (a mesma ordem da pilha).
+      const tot = s.unidades || 1;
+      h += '<div class="faixas-tip">' + v.faixas.map((f, k) => [f, k]).reverse().filter(([, k]) => s.por_faixa[k])
+        .map(([f, k]) => `<div><span class="sw" style="background:${corFaixa(k, v.faixas.length)}"></span>a ${esc(f.rot)}: <b>${nf(0).format(s.por_faixa[k])}</b> un. <span class="sub">(${nf(0).format((s.por_faixa[k] / tot) * 100)}%)</span></div>`).join('') + '</div>';
+    }
   } else h += `<div class="t">${fDiaHora.format(a.t)}</div><div>sem vendas aqui</div>`;
   if (a) {
     const dif = s && s.mediana ? (a.min / s.mediana - 1) * 100 : null;
     h += `<div><span class="sw" style="background:var(--serie-2)"></span>menor anúncio <b>${fmtNum(a.min, moeda)}</b>`
       + (dif != null ? ` (${dif >= 0 ? '+' : '−'}${nf(0).format(Math.abs(dif))}% da mediana)` : '') + '</div>';
     h += `<div class="sub">foto das ${fHora.format(a.t)}, ${nf(0).format(a.anuncios)} anúncios</div>`;
+  }
+  if (e) {
+    h += `<div>na loja <b>${nf(0).format(e.estoque)}</b> un. · ${nf(0).format(e.anuncios)} anúncios</div>`;
+    if (e.entradas != null) h += `<div class="sub">entraram ≈ ${nf(0).format(Math.max(0, e.entradas))} un. · venderam ${nf(0).format(e.vendidas)} (todas as moedas)${e.entradas < 0 ? ` · ${nf(0).format(-e.entradas)} saíram sem venda` : ''}</div>`;
+    else h += '<div class="sub">entradas: sem conta neste trecho</div>';
   }
   if (graf.fixo == null && s) h += '<div class="sub">clique para fixar</div>';
   const tip = $('#tooltip');
@@ -595,6 +702,7 @@ async function darZoom(de, ate) {
     de, ate, passo: atual.passo, carregando: true, resumo: null,
     serie: atual.serie.filter((s) => s.fim > de && s.t < ate),
     anuncios: atual.anun.filter((a) => a.t >= de && a.t <= ate),
+    estoque: atual.estoque.filter((e) => e.fim > de && e.t < ate),
   };
   graf.pilha.push(z);
   graf.fixo = null;
@@ -602,7 +710,7 @@ async function darZoom(de, ate) {
   desenharGraficos(d);
   try {
     const r = await api('/api/item/serie', { nome: d.nome, moeda: d.moeda, janela: d.janela, de, ate });
-    Object.assign(z, { passo: r.passo, serie: r.serie, anuncios: r.anuncios, resumo: r.resumo, carregando: false });
+    Object.assign(z, { passo: r.passo, serie: r.serie, anuncios: r.anuncios, estoque: r.estoque, resumo: r.resumo, carregando: false });
   } catch (e) {
     z.carregando = false;
   }
@@ -621,6 +729,7 @@ function voltarZoom(tudo) {
 function ligarControlesGrafico() {
   lerLocal('graf_ocultas').split(',').filter((k) => ['mediana', 'faixa', 'anuncio'].includes(k)).forEach((k) => graf.ocultas.add(k));
   if (graf.ocultas.size === 3) graf.ocultas.clear();
+  graf.pct = lerLocal('graf_vol_pct') === '1';
   $('#detalhe').addEventListener('click', (e) => {
     const leg = e.target.closest('[data-serie]');
     if (leg) {
@@ -628,6 +737,13 @@ function ligarControlesGrafico() {
       if (graf.ocultas.has(k)) graf.ocultas.delete(k); else graf.ocultas.add(k);
       if (graf.ocultas.size === 3) graf.ocultas.delete(k); // pelo menos uma série fica
       gravarLocal('graf_ocultas', [...graf.ocultas].join(','));
+      if (estado.ultimoItem) desenharGraficos(estado.ultimoItem);
+      return;
+    }
+    const mv = e.target.closest('[data-modo-vol]');
+    if (mv) {
+      graf.pct = mv.dataset.modoVol === 'pct';
+      gravarLocal('graf_vol_pct', graf.pct ? '1' : '');
       if (estado.ultimoItem) desenharGraficos(estado.ultimoItem);
       return;
     }
