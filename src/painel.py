@@ -274,7 +274,8 @@ def _faixas_preco(bons) -> list[dict]:
     de <= preço < ate (None = sem limite)."""
     peso: dict[float, int] = defaultdict(int)
     for _, r in bons:
-        peso[round(r["unit_price"], 2)] += r["qty"]
+        p = round(r["unit_price"], 2)
+        peso[int(p) if p == int(p) else p] += r["qty"]
     if not peso:
         return []
     precos = sorted(peso)
@@ -294,7 +295,7 @@ def _faixas_preco(bons) -> list[dict]:
     lo, hi = quantil(0.02), quantil(0.98)
     if inteiros and hi - lo + 1 <= MAX_FAIXAS - 2:
         faixas = [{"de": None, "ate": lo, "rot": f"≤ {_fmt_faixa(lo - 1)}"}] if precos[0] < lo else []
-        faixas += [{"de": float(v), "ate": float(v), "rot": _fmt_faixa(v)} for v in range(int(lo), int(hi) + 1)]
+        faixas += [{"de": v, "ate": v, "rot": _fmt_faixa(v)} for v in range(int(lo), int(hi) + 1)]
         if precos[-1] > hi:
             faixas.append({"de": hi + 1, "ate": None, "rot": f"≥ {_fmt_faixa(hi + 1)}"})
         return faixas
@@ -308,14 +309,17 @@ def _faixas_preco(bons) -> list[dict]:
         return [{"de": None, "ate": None, "rot": _rot_intervalo(precos[0], precos[-1])}]
     faixas, ant = [], None
     for c in cortes + [None]:
+        # Preço de unidade em unidade (gemas): "≤ 2" e "3–4". Em coins o corte é redondo e "< 13,5 mi" não
+        # deixa dúvida de onde fica o 13,5 mi (na faixa de cima).
+        un = inteiros and passo == 1
         if ant is None:
-            rot = f"≤ {_fmt_faixa(c - 1)}" if inteiros else f"< {_fmt_faixa(c)}"
+            rot = f"≤ {_fmt_faixa(c - 1)}" if un else f"< {_fmt_faixa(c)}"
         elif c is None:
             rot = f"≥ {_fmt_faixa(ant)}"
-        elif inteiros and c - ant == 1:
+        elif un and c - ant == 1:
             rot = _fmt_faixa(ant)
         else:
-            rot = _rot_intervalo(ant, c - 1 if inteiros else c)
+            rot = _rot_intervalo(ant, c - 1 if un else c)
         faixas.append({"de": ant, "ate": c, "rot": rot})
         ant = c
     return faixas

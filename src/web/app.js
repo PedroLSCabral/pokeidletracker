@@ -202,7 +202,7 @@ function desenharDetalhe(d) {
       <div class="grafico" id="g-vol"></div>
       <div class="titulo-mini">Na loja: unidades anunciadas</div>
       <div class="grafico" id="g-est"></div>
-      <div class="titulo-mini">Entrando na loja (estimativa: estoque novo − anterior + vendidas)</div>
+      <div class="titulo-mini">Entrando na loja (estimativa: estoque novo − anterior + vendidas; vermelho = saiu sem venda)</div>
       <div class="grafico" id="g-ent"></div>
       <div class="aviso" id="g-aviso"></div>
     </div>
@@ -264,7 +264,7 @@ const graf = {
   pilha: [],      // zooms empilhados: {de, ate, passo, serie, anuncios, resumo, carregando}
   fixo: null,     // t (início do balde) do ponto fixado
   ocultas: new Set(), // séries escondidas pela legenda (lembradas no localStorage)
-  pct: false,     // volume em % do balde (mostra a troca de 3 para 4 sem o tamanho do balde atrapalhar)
+  pct: true,      // volume em % do balde (mostra a troca de 3 para 4 sem o tamanho do balde atrapalhar)
   v: null,        // a vista desenhada agora (escalas e pontos), usada pelos eventos
 };
 
@@ -294,9 +294,11 @@ function vistaGrafico(d) {
   return { x0: d.inicio, x1: d.agora, serie: d.serie, anun: d.anuncios.filter((a) => a.min != null), passo: d.passo, zoom: null, estoque: d.estoque || [] };
 }
 
-// Faixas de preço do volume: rampa de um tom só (azul), da mais barata (escura) à mais cara (clara).
-// O servidor manda as mesmas faixas no zoom, então a cor de "4" não muda ao dar zoom.
-const RAMPA_FAIXAS = ['#1f6cb0', '#418ad1', '#60aaf3', '#80caff', '#bfe6ff'];
+// Faixas de preço do volume: rampa ordenada azul → verde-água → verde → amarelo (clareia junto com o preço),
+// com tons bem separados para o 3 e o 4 não se confundirem. O servidor manda as mesmas faixas no zoom,
+// então a cor de "4" não muda ao dar zoom.
+const RAMPA_FAIXAS = ['#4f6fe8', '#22a6b8', '#4cc46c', '#b9d63c', '#ffe45c'];
+// Com 2 ou 3 faixas, pula tons (azul e amarelo, ou azul, verde e amarelo) para separar mais.
 const corFaixa = (i, n) => RAMPA_FAIXAS[n <= 1 ? 2 : Math.round((i * (RAMPA_FAIXAS.length - 1)) / (n - 1))];
 
 function desenharGraficos(d) {
@@ -494,7 +496,7 @@ function desenharGraficos(d) {
         return;
       }
       const ya = YN(Math.max(0, e.entradas)), yb = YN(Math.min(0, e.entradas));
-      sn += `<rect data-t="${e.t}" x="${xa}" y="${ya}" width="${w}" height="${Math.max(1, yb - ya)}" fill="${e.entradas >= 0 ? 'var(--tinta-2)' : 'var(--tinta-3)'}" opacity="${e.entradas >= 0 ? 1 : 0.6}"/>`;
+      sn += `<rect data-t="${e.t}" x="${xa}" y="${ya}" width="${w}" height="${Math.max(1, yb - ya)}" fill="${e.entradas >= 0 ? 'var(--tinta-2)' : 'var(--desce)'}"/>`;
     });
   } else {
     se += `<text x="${m.l + pw / 2}" y="${HE / 2}" text-anchor="middle">sem fotos da vitrine neste trecho</text>`;
@@ -729,7 +731,7 @@ function voltarZoom(tudo) {
 function ligarControlesGrafico() {
   lerLocal('graf_ocultas').split(',').filter((k) => ['mediana', 'faixa', 'anuncio'].includes(k)).forEach((k) => graf.ocultas.add(k));
   if (graf.ocultas.size === 3) graf.ocultas.clear();
-  graf.pct = lerLocal('graf_vol_pct') === '1';
+  graf.pct = lerLocal('graf_vol_pct') !== 'un'; // "% do período" é o padrão: a troca de preço aparece mesmo num pico
   $('#detalhe').addEventListener('click', (e) => {
     const leg = e.target.closest('[data-serie]');
     if (leg) {
@@ -743,7 +745,7 @@ function ligarControlesGrafico() {
     const mv = e.target.closest('[data-modo-vol]');
     if (mv) {
       graf.pct = mv.dataset.modoVol === 'pct';
-      gravarLocal('graf_vol_pct', graf.pct ? '1' : '');
+      gravarLocal('graf_vol_pct', graf.pct ? 'pct' : 'un');
       if (estado.ultimoItem) desenharGraficos(estado.ultimoItem);
       return;
     }
