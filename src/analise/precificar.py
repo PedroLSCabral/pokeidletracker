@@ -116,10 +116,11 @@ def precos_moeda(con, comps, cb, nome, shiny, nivel, nota, potencia, moeda, igno
         return None
     justo = j["justo"]
     sh, fl, fn = int(bool(shiny)), pokemon._faixa(nivel, pokemon.FX_NIVEL), pokemon._faixa(nota, pokemon.FX_NOTA)
-    locais = comps.locais.get((moeda, nome, sh, fl, fn), [])
-    if locais:
-        m0 = statistics.median(locais)
-        locais = [p for p in locais if m0 / 4 <= p <= m0 * 4]
+    # As vendas que deram o preço justo (a célula exata ou a vizinhança da espécie, já corrigidas para este
+    # nível, nota e potência): o piso, o p75 e o "vendas ≥" saem delas.
+    par = comps.parecidas(nome, shiny, moeda, nivel, nota, potencia)
+    locais = par["precos"] if par else []
+    exatas = sum(1 for f, _p, _v in comps.por_nota.get((moeda, nome, sh, fn), ()) if f == fl)
     parecidos, melhores = [], []
     for a in _anuncios(con, nome, shiny, moeda):
         if a["id"] == ignorar_anuncio:
@@ -149,7 +150,7 @@ def precos_moeda(con, comps, cb, nome, shiny, nivel, nota, potencia, moeda, igno
         rapido, normal, paciente = min(rapido, tetos[0]), min(normal, tetos[1]), min(paciente, tetos[2])
     normal = max(normal, rapido)
     paciente = max(paciente, normal)
-    vendas_dia = len(locais) / pokemon.JANELA_COMPS_DIAS
+    vendas_dia = exatas / pokemon.JANELA_COMPS_DIAS
     opcoes = {}
     for k, p in (("rapido", rapido), ("normal", normal), ("paciente", paciente)):
         p = venda._arredondar(p, moeda)
@@ -161,7 +162,7 @@ def precos_moeda(con, comps, cb, nome, shiny, nivel, nota, potencia, moeda, igno
     return {
         "moeda": moeda, "justo": round(justo, 2), "faixa": [round(x, 2) for x in j["faixa"]],
         "confianca": j["confianca"], "metodo": j["metodo"], "comps": j["comps"],
-        "vendas_parecidas_14d": len(locais), "vendas_dia": round(vendas_dia, 2),
+        "vendas_parecidas_14d": exatas, "vendas_dia": round(vendas_dia, 2),
         "anuncios_parecidos": len(parecidos), "menor_parecido": parecidos[0]["preco"] if parecidos else None,
         "anuncios_melhores": len(melhores), "menor_melhor": melhores[0]["preco"] if melhores else None,
         "teto_melhor": teto is not None and teto < justo, "teto_normal": tetos is not None and tetos[1] < justo, "concorrencia_abaixo_do_piso": concorrencia_baixa,

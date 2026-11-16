@@ -1604,7 +1604,7 @@ async function copiarTexto(txt) {
 const ROT_VENDA = { rapido: 'Rápido', normal: 'Normal', paciente: 'Paciente' };
 const DICA_VENDA = {
   rapido: '1 abaixo do anúncio parecido mais barato (1º da fila), sem passar do preço justo nem descer do piso das vendas parecidas',
-  normal: 'o preço justo (vendas parecidas dos últimos 14 dias ou o modelo)',
+  normal: 'o preço justo (vendas parecidas dos últimos 14 dias, as da mesma espécie em níveis e notas vizinhos ou o modelo)',
   paciente: 'o p75 das vendas parecidas, pelo menos 15% acima do justo: espera o comprador certo',
 };
 const gemasTxt = (v) => (v == null ? '—' : htmlPreco(v, 'gems'));

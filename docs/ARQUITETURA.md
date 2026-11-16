@@ -408,9 +408,10 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
 
 ### `analise/pokemon.py` (Fase 4)
 - **`Comparaveis`** dá o preço justo de um Pokémon.
-  - Com 5 ou mais vendas parecidas (mesma espécie, shiny, moeda, faixa de nível e de nota), usa a mediana delas.
+  - `parecidas()` junta as vendas de comparação da própria espécie (mesmo shiny e moeda), cada uma corrigida para o nível, a nota e a potência pedidos pelos multiplicadores do modelo. Primeiro a célula exata (mesma faixa de nível e de nota: "vendas parecidas"), corrigida só pela potência de cada venda; com menos de 5, a vizinhança, do mais perto para o mais longe: mesma nota no nível ao lado, mesma nota em qualquer nível, nota ao lado no nível ao lado, nota ao lado em qualquer nível. Com 5 ou mais, o preço justo é a mediana delas. `por_nota[(moeda, espécie, shiny, faixa de nota)]` guarda `(faixa de nível, potência, preço)` de cada venda.
+  - A vizinhança vem antes do modelo porque os multiplicadores de nota e potência do modelo valem para todas as espécies e são puxados pelas baratas, que dominam a amostra. Em 11/2026 um Tyranitar P5 de nota 4,7 no nível 100 saía por 210 gemas pelo modelo, contra vendas de 400 a 1.000 da espécie com essa nota nos níveis 100-200. E as vendas parecidas eram multiplicadas pelo bônus de P5 mesmo já sendo todas P5 (o Larvitar P5 saía por 404 em vez de 310).
   - As faixas: nível `FX_NIVEL` (<100, 100, 101-200, 201-500, 501-1000, 1000+) e nota `FX_NOTA` (3,5 / 3,7 / 3,9 / 4,1 / 4,3 / 4,5 / 5 / 6). As de nota acima de 4,3 entraram em 11/2026: antes uma nota 4,35 e uma nota 6 caíam na mesma faixa.
-  - Senão, usa o modelo de multiplicadores em log: base da espécie × nível × nota × potência, ajustado por backfitting.
+  - Sem vendas suficientes nem na vizinhança, usa o modelo de multiplicadores em log: base da espécie × nível × nota × potência, ajustado por backfitting.
   - Uma espécie cujas vendas saem todas como fora da curva no 2º ajuste fica sem preço base: `preco_justo` confere `(especie, shiny) in base` antes de usar o modelo.
 - **`taxa_venda`** calcula a comissão progressiva do jogo para Pokémon.
 - **`lado_fisico(species_id, nivel, stats)`** diz quanto da força da espécie é física (0 a 1): os golpes do catálogo liberados no nível, cada um pesando poder ÷ recarga. Sem catálogo, o maior entre ATK e SP.ATK do Pokémon. Guarda em cache por (motor, espécie, nível).
@@ -457,7 +458,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
 ### `analise/precificar.py` (preço de venda de um Pokémon e até que nível vale subir)
 - **Para que serve:** o "botão vender" dos Pokémon. Junta o preço justo (`Comparaveis`), a loja (`pk_anuncios`), a comissão (`taxa_venda`), o câmbio (`venda.cambio`) e a trilha da evolução. A explicação completa está no topo do arquivo.
 - **`precos_agora` / `precos_moeda`:** três preços por moeda (shiny só gemas), cada um com a comissão e o líquido (em gemas, já com 1 diária de anúncio):
-  - *rápido:* 1 passo abaixo do anúncio parecido mais barato (mesma espécie, shiny, moeda e faixas de nível e nota), sem passar do justo nem descer do piso (p10 das vendas parecidas; sem elas, 60% do justo);
+  - *rápido:* 1 passo abaixo do anúncio parecido mais barato (mesma espécie, shiny, moeda e faixas de nível e nota), sem passar do justo nem descer do piso (p10 das vendas de `parecidas()`, exatas ou da vizinhança; sem elas, 60% do justo);
   - *normal:* o preço justo; *paciente:* o p75 das vendas parecidas, no mínimo justo × 1,15;
   - os anúncios **melhores** (nível, nota − 0,05 e potência pelo menos iguais) mais baratos formam uma fila: o rápido fica abaixo do 1º, o normal do 2º e o paciente do 3º; o anúncio que está sendo analisado não conta como concorrente;
   - a moeda segue a regra dos itens: coins só se render `PREFERENCIA_GEMAS` (5%) a mais depois da troca.

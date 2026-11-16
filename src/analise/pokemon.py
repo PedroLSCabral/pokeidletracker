@@ -242,11 +242,14 @@ class Comparaveis:
                                 FROM trades WHERE kind='pokemon' AND total > 0 AND ts >= ?""", (desde,)):
             self.vendas[r["currency"]].append((r["base_name"], int(r["shiny"] or 0), _faixa(r["level"], FX_NIVEL),
                                                _faixa(r["nota"], FX_NOTA), int(r["potencia"] or 1), r["total"]))
-        self.locais: dict[tuple, list] = defaultdict(list)
+        # As vendas de cada espécie por faixa de nota: (faixa de nível, potência, preço). A célula exata
+        # (mesma faixa de nível) são as "vendas parecidas"; as outras faixas de nível são a vizinhança.
+        self.por_nota: dict[tuple, list] = defaultdict(list)
         for moeda, vs in self.vendas.items():
             for esp, sh, fl, fn, pot, preco in vs:
-                self.locais[(moeda, esp, sh, fl, fn)].append(preco)
+                self.por_nota[(moeda, esp, sh, fn)].append((fl, pot, preco))
         self.modelos = {m: self._ajustar(vs) for m, vs in self.vendas.items()}
+        self._cache_parecidas: dict = {}   # a busca pede a mesma célula para muitos anúncios
 
     @staticmethod
     def _ajustar(vs, outliers_log: float = 1.6):
@@ -288,33 +291,65 @@ class Comparaveis:
         return {"base": base, "nivel": dict(niv), "nota": dict(nota), "pot": dict(pot), "n_grupo": n_grupo,
                 "n_faixa": n_faixa, "n_esp_nivel": n_esp_nivel}
 
+    def parecidas(self, especie, shiny, moeda, nivel, nota, potencia) -> dict | None:
+        """As vendas da mesma espécie que servem de comparação, já trazidas para o nível, a nota e a potência
+        pedidos pelos multiplicadores do modelo. None se não há pelo menos MIN_LOCAIS.
+
+        Primeiro a célula exata (mesma faixa de nível e de nota); cada venda é corrigida só pela potência
+        dela (uma P5 pedida contra vendas P5 não ganha o bônus de P5 de novo). Se a célula tem poucas
+        vendas, a vizinhança da própria espécie, do mais perto para o mais longe: mesma nota com a faixa de
+        nível ao lado, mesma nota em qualquer nível, nota ao lado com o nível ao lado, nota ao lado em
+        qualquer nível. A vizinhança vem antes do modelo porque os multiplicadores de nota e potência do
+        modelo são os mesmos para todas as espécies, puxados pelas baratas que dominam a amostra: um
+        Tyranitar P5 de nota 4,7 no nível 100 (1 venda na célula) saía por 210 gemas pelo modelo, contra
+        vendas de 400 a 1.000 da mesma espécie e nota nos níveis 100-200."""
+        sh, fl, fn, pot = int(shiny or 0), _faixa(nivel, FX_NIVEL), _faixa(nota, FX_NOTA), int(potencia or 1)
+        chave = (moeda, especie, sh, fl, fn, pot)
+        if chave not in self._cache_parecidas:
+            self._cache_parecidas[chave] = self._parecidas(moeda, especie, sh, fl, fn, pot)
+        return self._cache_parecidas[chave]
+
+    def _parecidas(self, moeda, especie, sh, fl, fn, pot) -> dict | None:
+        mod = self.modelos.get(moeda)
+        c = (lambda k, x: mod[k].get(x, 0.0)) if mod else (lambda k, x: 0.0)  # noqa: E731
+        passos = ((0, 0),) + (((0, 1), (0, 99), (1, 1), (1, 99)) if mod else ())
+        for dn, dl in passos:
+            ps = []
+            for n in range(fn - dn, fn + dn + 1):
+                for fl_v, pot_v, preco in self.por_nota.get((moeda, especie, sh, n), ()):
+                    if abs(fl_v - fl) <= dl:
+                        ps.append(preco * math.exp(c("nivel", fl) - c("nivel", fl_v) + c("nota", fn) - c("nota", n)
+                                                   + c("pot", pot) - c("pot", pot_v)))
+            if ps:  # sem as absurdas (fora de 4× a mediana delas)
+                m0 = statistics.median(ps)
+                ps = [p for p in ps if m0 / 4 <= p <= m0 * 4]
+            if len(ps) >= MIN_LOCAIS:
+                onde = " em níveis vizinhos" if dl == 1 else " em outros níveis"
+                metodo = "vendas parecidas" if not (dn or dl) else (
+                    ("vendas da espécie com a mesma nota" if not dn else "vendas da espécie com nota vizinha") + onde)
+                return {"precos": sorted(ps), "metodo": metodo, "exatas": not dn and not dl}
+        return None
+
     def preco_justo(self, especie, shiny, moeda, nivel, nota, potencia) -> dict | None:
         sh, fl, fn, pot = int(shiny or 0), _faixa(nivel, FX_NIVEL), _faixa(nota, FX_NOTA), int(potencia or 1)
-        locais = self.locais.get((moeda, especie, sh, fl, fn), [])
         mod = self.modelos.get(moeda)
-        estimativa = None
+        par = self.parecidas(especie, shiny, moeda, nivel, nota, potencia)
+        if par:
+            ps = par["precos"]
+            n = len(ps)
+            conf = "alta" if par["exatas"] and n >= MIN_LOCAIS_ALTA else "média"
+            return {"justo": statistics.median(ps), "faixa": (ps[n // 4], ps[(3 * n) // 4]), "comps": n,
+                    "confianca": conf, "metodo": par["metodo"]}
         # `in base`: uma espécie cujas vendas saíram todas como fora da curva no 2º ajuste fica sem preço base.
-        if mod and mod["n_grupo"].get((especie, sh), 0) >= MIN_GRUPO and (especie, sh) in mod["base"]:
-            ln = mod["base"][(especie, sh)] + mod["nivel"].get(fl, 0) + mod["nota"].get(fn, 0) + mod["pot"].get(pot, 0)
-            estimativa = math.exp(ln)
-        if locais:  # vendas parecidas, sem as absurdas (fora de 4× a mediana delas)
-            m0 = statistics.median(locais)
-            locais = [p for p in locais if m0 / 4 <= p <= m0 * 4]
-        if len(locais) >= MIN_LOCAIS:
-            ps = sorted(locais)
-            justo = statistics.median(ps)
-            # P4/P5 vale mais que a mediana local (que mistura potências): aplica só o multiplicador da potência.
-            if mod and pot >= 4:
-                justo *= math.exp(mod["pot"].get(pot, 0))
-            return {"justo": justo, "faixa": (ps[len(ps) // 4], ps[(3 * len(ps)) // 4]), "comps": len(locais),
-                    "confianca": "alta" if len(locais) >= MIN_LOCAIS_ALTA else "média", "metodo": "vendas parecidas"}
-        if estimativa is None:
+        if not (mod and mod["n_grupo"].get((especie, sh), 0) >= MIN_GRUPO and (especie, sh) in mod["base"]):
             return None
+        ln = mod["base"][(especie, sh)] + mod["nivel"].get(fl, 0) + mod["nota"].get(fn, 0) + mod["pot"].get(pot, 0)
+        estimativa = math.exp(ln)
         ng = mod["n_grupo"][(especie, sh)]
         faixas_ok = all(mod["n_faixa"][k].get(x, 0) >= 10 for k, x in (("nivel", fl), ("nota", fn), ("pot", pot)))
         # Extrapolar para uma faixa de nível que a espécie nunca vendeu não merece confiança.
         conf = "média" if ng >= 8 and faixas_ok and mod["n_esp_nivel"].get((especie, sh, fl), 0) >= 2 else "baixa"
-        return {"justo": estimativa, "faixa": (estimativa * 0.6, estimativa * 1.6), "comps": len(locais) or ng,
+        return {"justo": estimativa, "faixa": (estimativa * 0.6, estimativa * 1.6), "comps": ng,
                 "confianca": conf, "metodo": "modelo"}
 
 
