@@ -7,6 +7,7 @@ Só escuta no próprio PC.
 from __future__ import annotations
 
 import json
+import math
 import mimetypes
 import sqlite3
 import statistics
@@ -257,9 +258,20 @@ def _fmt_faixa(v: float) -> str:
     return f"{v:.4g}".replace(".", ",")
 
 
-def _rot_intervalo(a: float, b: float) -> str:
-    """'13–14 mi' em vez de '13 mi–14 mi'."""
-    ra, rb = _fmt_faixa(a), _fmt_faixa(b)
+def _fmt_faixa_baixo(v: float) -> str:
+    """Como _fmt_faixa, mas sem arredondar para cima: 14.999.999 é "14,99 mi", não "15 mi"."""
+    for div, suf in ((1_000_000, " mi"), (1000, " mil"), (1, "")):
+        if v >= (10_000 if div == 1000 else div) or div == 1:
+            x = v / div
+            casas = max(0, 4 - len(str(int(x))))
+            x = math.floor(x * 10 ** casas + 1e-9) / 10 ** casas
+            return f"{x:.4g}{suf}".replace(".", ",")
+    return _fmt_faixa(v)
+
+
+def _rot_intervalo(a: float, b: float, baixo: bool = False) -> str:
+    """'13–14 mi' em vez de '13 mi–14 mi'. Com `baixo`, o limite de cima não arredonda para cima."""
+    ra, rb = _fmt_faixa(a), (_fmt_faixa_baixo(b) if baixo else _fmt_faixa(b))
     for suf in (" mi", " mil"):
         if ra.endswith(suf) and rb.endswith(suf):
             return f"{ra[:-len(suf)]}–{rb}"
@@ -353,14 +365,19 @@ def _faixas_preco(bons) -> list[dict]:
                 return pr
         return pesos[-1][0]
     lo, hi = quantil_h(0.05), quantil_h(0.95)
-    bruto = max((hi - lo) / 4, 1 if inteiros else 1e-9)
+    # O menor passo redondo que cabe em MAX_FAIXAS (14,5 a 30 mi: de 2,5 em 2,5 mi, não de 5 em 5).
+    bruto = max((hi - lo) / (MAX_FAIXAS - 1), 1 if inteiros else 1e-9)
     ordem = 10 ** int(f"{bruto:e}".split("e")[1])
-    passo = next(m * ordem for m in (1, 2, 2.5, 5, 10) if m * ordem >= bruto)
-    if inteiros and passo != int(passo):
-        passo = int(passo) + 1
-    k0 = int(lo // passo) + 1
-    cortes = [round(k * passo, 6) for k in range(k0, int(hi // passo) + 1)]
-    cortes = [int(c) if c == int(c) else c for c in cortes if precos[0] < c <= precos[-1]]
+    def cortes_de(passo):
+        cs = [round(k * passo, 6) for k in range(int(lo // passo) + 1, int(hi // passo) + 1)]
+        return [int(c) if c == int(c) else c for c in cs if precos[0] < c <= precos[-1]]
+    cortes = []
+    for passo in (m * ordem for m in (0.5, 1, 2, 2.5, 5, 10, 20)):
+        if inteiros and passo != int(passo):
+            continue
+        cortes = cortes_de(passo)
+        if len(cortes) <= MAX_FAIXAS - 1:
+            break
     if not cortes:
         return [{"de": None, "ate": None, "rot": _rot_intervalo(precos[0], precos[-1])}]
     faixas, ant = [], None
@@ -393,21 +410,23 @@ def _faixa_de(faixas: list[dict], preco: float) -> int:
 
 
 def _precos_balde(msrs, faixas: list[dict]) -> list[dict]:
-    """O que vendeu no balde, pelas faixas do próprio balde (do mais caro ao mais barato), para o tooltip.
+    """O que vendeu no balde (do mais caro ao mais barato), para o tooltip.
 
-    Em gemas costuma ser cada preço que saiu ali ("a 6", "a 5", "a 4"...), em vez das faixas da janela
-    inteira, que juntam as pontas. Cada grupo fica dentro de uma faixa da janela (`f`), para a cor bater com
+    Em gemas é cada preço que saiu ali ("a 6", "a 5", "a 4"...), em vez das faixas da janela inteira,
+    que juntam as pontas. Em coins, as faixas da janela com os preços reais no rótulo ("25,05–27,48 mi"). Cada grupo fica dentro de uma faixa da janela (`f`), para a cor bater com
     a da barra empilhada."""
     locais = _faixas_preco(msrs)
-    # Grupo = faixa do balde cortada também nas faixas da janela, para cada linha ter uma cor só.
+    # Um preço por linha quando o balde tem poucos preços (gemas). Senão (coins), as faixas da janela, que já
+    # acompanham a alta, com o rótulo dos preços que saíram de fato: cortar mais deixaria o tooltip enorme.
+    um_a_um = all(f["de"] is not None and f["de"] == f["ate"] for f in locais)
     grupos: dict[tuple, list] = defaultdict(list)
     for _, r in msrs:
-        grupos[(_faixa_de(faixas, r["unit_price"]), _faixa_de(locais, r["unit_price"]))].append(r)
+        grupos[(_faixa_de(faixas, r["unit_price"]), _faixa_de(locais, r["unit_price"]) if um_a_um else 0)].append(r)
     out = []
     for (f, _), rs in grupos.items():
         # O rótulo diz os preços que de fato saíram ali ("1–2" em vez de "≤ 2").
         a, b = min(r["unit_price"] for r in rs), max(r["unit_price"] for r in rs)
-        rot = _fmt_faixa(a) if _fmt_faixa(a) == _fmt_faixa(b) else _rot_intervalo(a, b)
+        rot = _fmt_faixa(a) if a == b else _rot_intervalo(a, b, baixo=True)
         out.append({"rot": rot, "un": sum(r["qty"] for r in rs), "f": f, "_p": b})
     out.sort(key=lambda g: -g.pop("_p"))
     return out
