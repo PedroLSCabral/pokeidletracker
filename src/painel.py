@@ -270,8 +270,9 @@ def _fmt_faixa_baixo(v: float) -> str:
 
 
 def _rot_intervalo(a: float, b: float, baixo: bool = False) -> str:
-    """'13–14 mi' em vez de '13 mi–14 mi'. Com `baixo`, o limite de cima não arredonda para cima."""
-    ra, rb = _fmt_faixa(a), (_fmt_faixa_baixo(b) if baixo else _fmt_faixa(b))
+    """'13–14 mi' em vez de '13 mi–14 mi'. Com `baixo`, nenhum limite arredonda para cima."""
+    fmt = _fmt_faixa_baixo if baixo else _fmt_faixa
+    ra, rb = fmt(a), fmt(b)
     for suf in (" mi", " mil"):
         if ra.endswith(suf) and rb.endswith(suf):
             return f"{ra[:-len(suf)]}–{rb}"
