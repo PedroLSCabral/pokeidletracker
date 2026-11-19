@@ -246,7 +246,7 @@ def _vendas_janela(con, nome: str, moeda: str, dur, t: int):
     return linhas, (lambda p: lo <= p <= hi)
 
 
-MAX_FAIXAS = 5  # faixas de preço no gráfico de volume (cores de uma rampa só, da mais barata à mais cara)
+MAX_FAIXAS = 7  # faixas de preço no gráfico de volume (cores de uma rampa só, da mais barata à mais cara)
 
 
 def _fmt_faixa(v: float) -> str:
@@ -266,16 +266,42 @@ def _rot_intervalo(a: float, b: float) -> str:
     return f"{ra}–{rb}"
 
 
-def _faixas_preco(bons) -> list[dict]:
-    """Faixas de preço para empilhar o volume: quem vende a 3 e quem vende a 4.
-
-    Até MAX_FAIXAS preços distintos, cada preço é uma faixa (o caso das gemas). Acima disso,
-    cortes nos quintis das unidades, arredondados para números redondos. Cada faixa vale
-    de <= preço < ate (None = sem limite)."""
+def _peso_por_preco(bons) -> dict:
     peso: dict[float, int] = defaultdict(int)
     for _, r in bons:
         p = round(r["unit_price"], 2)
         peso[int(p) if p == int(p) else p] += r["qty"]
+    return peso
+
+
+def _pico_por_preco(bons, precos) -> dict:
+    """Quanto cada preço chegou a pesar numa hora: a maior fatia das unidades da hora que saiu a esse preço.
+
+    Assim um preço que domina o fim da janela (o token subindo para 5 e 6) ganha faixa própria mesmo sendo
+    pouco na semana. Horas fracas (menos de ¼ da hora típica) ficam de fora, para uma venda solta num
+    horário morto não virar "100%"."""
+    horas: dict[int, dict] = defaultdict(lambda: defaultdict(int))
+    for ms, r in bons:
+        p = round(r["unit_price"], 2)
+        horas[ms // HORA][int(p) if p == int(p) else p] += r["qty"]
+    tots = {h: sum(v.values()) for h, v in horas.items()}
+    corte = mediana(list(tots.values())) / 4 if tots else 0
+    pico = dict.fromkeys(precos, 0.0)
+    for h, v in horas.items():
+        if tots[h] >= corte:
+            for p, u in v.items():
+                pico[p] = max(pico[p], u / tots[h])
+    return pico
+
+
+def _faixas_preco(bons) -> list[dict]:
+    """Faixas de preço para empilhar o volume: quem vende a 3, a 4, a 5...
+
+    Até MAX_FAIXAS preços distintos, cada preço é uma faixa (o caso das gemas). Preço inteiro em poucos
+    valores (gemas com algumas vendas soltas nas pontas): um preço por faixa onde o mercado esteve de fato
+    em alguma hora da janela, e as pontas raras juntas ("≤ 2", "≥ 7"). Acima disso, cortes nos quintis
+    das unidades, arredondados para números redondos. Cada faixa vale de <= preço < ate (None = sem limite)."""
+    peso = _peso_por_preco(bons)
     if not peso:
         return []
     precos = sorted(peso)
@@ -290,13 +316,25 @@ def _faixas_preco(bons) -> list[dict]:
             if acum >= q * total:
                 return p
         return precos[-1]
-    # Preço inteiro concentrado em poucos valores (gemas: quase tudo a 2, 3 ou 4): um preço por faixa
-    # no miolo e as pontas raras juntas, para a troca de 3 para 4 não sumir dentro de "≥ 3".
-    lo, hi = quantil(0.02), quantil(0.98)
-    if inteiros and hi - lo + 1 <= MAX_FAIXAS - 2:
-        faixas = [{"de": None, "ate": lo, "rot": f"≤ {_fmt_faixa(lo - 1)}"}] if precos[0] < lo else []
-        faixas += [{"de": v, "ate": v, "rot": _fmt_faixa(v)} for v in range(int(lo), int(hi) + 1)]
-        if precos[-1] > hi:
+    pmin, pmax = int(precos[0]), int(precos[-1])
+    if inteiros and pmax - pmin < 60:
+        # A janela de preços seguidos que cobre mais "pico" (empate: mais unidades), com as pontas juntas.
+        # Antes as faixas iam do quantil de 2% ao de 98% da janela inteira: com a semana quase toda a 3,
+        # o token a 4, 5 e 6 virava um "≥ 4" só.
+        pico = _pico_por_preco(bons, precos)
+        melhor = None
+        for lo in range(pmin, pmax + 1):
+            for hi in range(lo, pmax + 1):
+                if (hi - lo + 1) + (lo > pmin) + (hi < pmax) > MAX_FAIXAS:
+                    break
+                nota = (sum(pico.get(v, 0) for v in range(lo, hi + 1)),
+                        sum(peso.get(v, 0) for v in range(lo, hi + 1)), -(hi - lo))
+                if melhor is None or nota > melhor[0]:
+                    melhor = (nota, lo, hi)
+        _, lo, hi = melhor
+        faixas = [{"de": None, "ate": lo, "rot": f"≤ {_fmt_faixa(lo - 1)}"}] if pmin < lo else []
+        faixas += [{"de": v, "ate": v, "rot": _fmt_faixa(v)} for v in range(lo, hi + 1)]
+        if pmax > hi:
             faixas.append({"de": hi + 1, "ate": None, "rot": f"≥ {_fmt_faixa(hi + 1)}"})
         return faixas
     p10, p90 = quantil(0.1), quantil(0.9)
@@ -336,22 +374,55 @@ def _faixa_de(faixas: list[dict], preco: float) -> int:
     return min(range(len(faixas)), key=lambda i: abs((faixas[i]["de"] or 0) - p)) if faixas else 0
 
 
+def _precos_balde(msrs, faixas: list[dict]) -> list[dict]:
+    """O que vendeu no balde, pelas faixas do próprio balde (do mais caro ao mais barato), para o tooltip.
+
+    Em gemas costuma ser cada preço que saiu ali ("a 6", "a 5", "a 4"...), em vez das faixas da janela
+    inteira, que juntam as pontas. `f` é a faixa da janela onde a faixa do balde cai, para a cor bater com
+    a da barra empilhada."""
+    locais = _faixas_preco(msrs)
+    un = [0] * len(locais)
+    precos: list[list] = [[] for _ in locais]
+    for _, r in msrs:
+        i = _faixa_de(locais, r["unit_price"])
+        un[i] += r["qty"]
+        precos[i].append((r["unit_price"], r["qty"]))
+    out = []
+    for i, f in enumerate(locais):
+        if not un[i]:
+            continue
+        # Preço que representa a faixa: o do meio das unidades.
+        meio, acum = None, 0
+        for pr, q in sorted(precos[i]):
+            acum += q
+            if acum * 2 >= un[i]:
+                meio = pr
+                break
+        # O rótulo diz os preços que de fato saíram ali ("1–2" em vez de "≤ 2").
+        a, b = min(pr for pr, _ in precos[i]), max(pr for pr, _ in precos[i])
+        rot = _fmt_faixa(a) if _fmt_faixa(a) == _fmt_faixa(b) else _rot_intervalo(a, b)
+        out.append({"rot": rot, "un": un[i], "f": _faixa_de(faixas, meio)})
+    return out[::-1]
+
+
 def _baldes(bons, ini: int, fim: int, faixas: list[dict] | None = None):
     """Agrupa as vendas de [ini, fim] em até MAX_BALDES baldes.
 
     Os baldes começam em horas redondas do horário de Brasília (14:00–14:15, não 14:07–14:22),
     para o tooltip e o eixo baterem com o relógio. Com `faixas`, cada balde traz também as
-    unidades vendidas em cada faixa de preço (`por_faixa`)."""
+    unidades vendidas em cada faixa de preço da janela (`por_faixa`, para a barra empilhada) e pelas
+    faixas do próprio balde (`precos`, para o tooltip)."""
     span = max(fim - ini, 1)
     passo = next((p for p in PASSOS_GRAFICO if span / p <= MAX_BALDES), PASSOS_GRAFICO[-1])
     desloc = DESLOC_BRT
     baldes: dict[int, list] = defaultdict(list)
     for ms, r in bons:
         if ini <= ms <= fim:
-            baldes[(ms + desloc) // passo].append(r)
+            baldes[(ms + desloc) // passo].append((ms, r))
     serie = []
     for k in sorted(baldes):
-        rs = baldes[k]
+        msrs = baldes[k]
+        rs = [r for _, r in msrs]
         ps = [r["unit_price"] for r in rs]
         t0 = k * passo - desloc
         b = {"t": t0, "fim": t0 + passo, "mediana": mediana(ps),
@@ -361,6 +432,7 @@ def _baldes(bons, ini: int, fim: int, faixas: list[dict] | None = None):
             for r in rs:
                 pf[_faixa_de(faixas, r["unit_price"])] += r["qty"]
             b["por_faixa"] = pf
+            b["precos"] = _precos_balde(msrs, faixas)
         serie.append(b)
     return passo, serie
 

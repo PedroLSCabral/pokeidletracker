@@ -294,11 +294,11 @@ function vistaGrafico(d) {
   return { x0: d.inicio, x1: d.agora, serie: d.serie, anun: d.anuncios.filter((a) => a.min != null), passo: d.passo, zoom: null, estoque: d.estoque || [] };
 }
 
-// Faixas de preço do volume: rampa ordenada azul → verde-água → verde → amarelo (clareia junto com o preço),
+// Faixas de preço do volume: rampa ordenada azul → verde-água → verde → amarelo → laranja (até 7 faixas),
 // com tons bem separados para o 3 e o 4 não se confundirem. O servidor manda as mesmas faixas no zoom,
 // então a cor de "4" não muda ao dar zoom.
-const RAMPA_FAIXAS = ['#4f6fe8', '#22a6b8', '#4cc46c', '#b9d63c', '#ffe45c'];
-// Com 2 ou 3 faixas, pula tons (azul e amarelo, ou azul, verde e amarelo) para separar mais.
+const RAMPA_FAIXAS = ['#4f6fe8', '#2b8fd8', '#22b0a8', '#4cc46c', '#a6d63a', '#ffe45c', '#ffa94d'];
+// Com menos faixas que tons, pula tons (2 faixas: azul e laranja) para separar mais.
 const corFaixa = (i, n) => RAMPA_FAIXAS[n <= 1 ? 2 : Math.round((i * (RAMPA_FAIXAS.length - 1)) / (n - 1))];
 
 function desenharGraficos(d) {
@@ -654,11 +654,12 @@ function mostrarPonto(i, ev, t) {
       + (varr != null && Math.abs(varr) >= 0.05 ? ` <span class="var ${varr > 0 ? 'sobe' : 'desce'}">${varr > 0 ? '▲' : '▼'} ${nf(1).format(Math.abs(varr))}%</span>` : '') + '</div>';
     h += `<div>faixa <b>${fmtNum(s.min, moeda)} – ${fmtNum(s.max, moeda)}</b></div>`;
     h += `<div>${nf(0).format(s.vendas)} vendas · ${nf(0).format(s.unidades)} un.</div>`;
-    if (s.por_faixa && v.faixas.length > 1) {
-      // Uma linha por faixa que vendeu, da mais cara para a mais barata (a mesma ordem da pilha).
-      const tot = s.unidades || 1;
-      h += '<div class="faixas-tip">' + v.faixas.map((f, k) => [f, k]).reverse().filter(([, k]) => s.por_faixa[k])
-        .map(([f, k]) => `<div><span class="sw" style="background:${corFaixa(k, v.faixas.length)}"></span>a ${esc(f.rot)}: <b>${nf(0).format(s.por_faixa[k])}</b> un. <span class="sub">(${nf(0).format((s.por_faixa[k] / tot) * 100)}%)</span></div>`).join('') + '</div>';
+    if (s.precos && s.precos.length > 1) {
+      // Uma linha por preço (ou faixa) que vendeu NESTE período, do mais caro ao mais barato. As faixas
+      // saem das vendas do próprio período, não da janela: com o token entre 2 e 6, aparece "a 6", "a 5"...
+      // e não um "≥ 4" só. A cor é a da faixa da barra empilhada onde esse preço cai.
+      const tot = s.unidades || 1, nfx = v.faixas.length;
+      h += '<div class="faixas-tip">' + s.precos.map((p) => `<div><span class="sw" style="background:${nfx > 1 ? corFaixa(p.f, nfx) : 'var(--serie-1)'}"></span>a ${esc(p.rot)}: <b>${nf(0).format(p.un)}</b> un. <span class="sub">(${nf(0).format((p.un / tot) * 100)}%)</span></div>`).join('') + '</div>';
     }
   } else h += `<div class="t">${fDiaHora.format(a.t)}</div><div>sem vendas aqui</div>`;
   if (a) {
