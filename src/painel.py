@@ -426,7 +426,10 @@ def _precos_balde(msrs, faixas: list[dict]) -> list[dict]:
     for (f, _), rs in grupos.items():
         # O rótulo diz os preços que de fato saíram ali ("1–2" em vez de "≤ 2").
         a, b = min(r["unit_price"] for r in rs), max(r["unit_price"] for r in rs)
-        rot = _fmt_faixa(a) if a == b else _rot_intervalo(a, b, baixo=True)
+        # Sem arredondar para cima: 19.999.999 é "19,99 mi" (fica na faixa 17,5–20) e 20.000.100 junto de
+        # 20.000.000 é só "20 mi", não "20–20 mi".
+        ra, rb = _fmt_faixa_baixo(a), _fmt_faixa_baixo(b)
+        rot = ra if ra == rb else _rot_intervalo(a, b, baixo=True)
         out.append({"rot": rot, "un": sum(r["qty"] for r in rs), "f": f, "_p": b})
     out.sort(key=lambda g: -g.pop("_p"))
     return out
