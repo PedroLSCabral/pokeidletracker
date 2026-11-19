@@ -15,6 +15,7 @@ revenda, alertas, botão vender, Pokémon e PvP. A bandeja do Windows mantém os
 |---|---|
 | Socket do jogo, agenda, reconexão, servidor da extensão | `src/robo.py` |
 | Extensão do Idle Deck (ponte aba do jogo ↔ robô) | `extensao/` (`pagina.js`, `aba.js`, `fundo.js`) |
+| Extensão Ritmo de XP (tempo até o nível X, na aba do jogo) | `extensao-xp/` (`calculo.js`, `ritmo.js`) |
 | Gravação de vendas, vitrine, itens, poda, agenda (`coleta`) | `src/coleta/coletor.py` |
 | Esquema do banco, CSV/JSON do export, `connect()` | `src/coleta/importer.py` |
 | Loja de Pokémon (tabelas e gravação) | `src/coleta/lojapk.py` |
@@ -52,6 +53,7 @@ revenda, alertas, botão vender, Pokémon e PvP. A bandeja do Windows mantém os
 - **Religar depois de mudar Python:** use o menu da bandeja ou mate o processo `src\robo.py`/`src\painel.py`; a bandeja religa em ~30 s. Mudou `bandeja.py`, `menu_bandeja.py` ou `tema.py`? Use Sair no menu e ligue de novo. Mudanças em `src/web/` só pedem recarregar a página.
 - **Painel de teste sem mexer no que está rodando:** `python src/painel.py --porta 8771` (já está em `.claude/launch.json`).
 - **Robô sem tocar no jogo:** `python testes/teste_robo_sessao.py` (jogo falso, banco temporário) e `python testes/teste_robo_extensao.py` (aba falsa da extensão).
+- **Extensão Ritmo de XP:** `node testes/teste_extensao_xp.js --tela`.
 - **Extensão:** `node --check extensao/*.js`. Depois de mudar a pasta, ela só vale no Idle Deck com *Recarregar da pasta* (ele guarda uma cópia).
 - **Verificação rápida:**
   - `python -m py_compile src/*.py src/coleta/*.py src/analise/*.py`;

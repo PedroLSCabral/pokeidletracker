@@ -448,5 +448,12 @@ O Idle Deck ganhou um modo desenvolvedor que carrega extensões locais (MV3, Ele
 - **Troca sem configurar nada.** Com a conta coletora configurada, o robô escuta a extensão ao mesmo tempo; quando uma aba liga, ele larga a conta e grava `"conexao": "extensao"`. Ele não volta para a conta sozinho, porque ela pode estar aberta no Idle Deck e um login do robô derrubaria a aba (4001).
 - **Por que a página precisa engolir a resposta:** o userscript trocava o `onmessage`; a extensão põe o primeiro ouvinte no socket ao criá-lo e usa `stopImmediatePropagation`, que também barra o `onmessage` e os `addEventListener` do jogo.
 
+## Ritmo de XP: tempo até o nível X (19/11)
+Pedido: medir o ritmo de XP de agora, levar em conta o XP cada vez maior dos próximos níveis e estimar o tempo até um nível escolhido, com todos os bônus de XP ligáveis e, como padrão, os que a conta está usando.
+- **Extensão à parte, e não aba do painel.** O que a conta tem (nível, XP, bônus, Pokémon) só existe no socket de cada aba, e a extensão do coletor tira o `estado` do welcome de propósito e liga uma aba por vez. Uma extensão que só ouve o socket mostra os dados de cada conta na própria aba, sem mandar nada ao servidor e sem passar dados da conta para o PC.
+- **Bônus pelo que o servidor diz.** O `estado.bonusXp` traz o total e as partes (`id`, `tr`, `pk`, `ate`): são esses o padrão. Os fatores de quem está desligado vêm do cliente do jogo (`hunt-analyser.mjs`, `guild-boost.mjs`, `sacrificio.mjs`, `tiposBoost` do welcome).
+- **Ritmo sem bônus.** Cada ganho de XP é dividido pelo bônus daquele momento; assim um bônus que acabou no meio da janela não distorce a projeção, e ligar ou desligar um bônus só multiplica o ritmo cru.
+- **Limites:** supõe a mesma hunt e o mesmo Pokémon até o alvo (o ritmo cru não sobe com o nível); a perda de XP na morte entra no ritmo medido.
+
 ## Perguntas em aberto
 - Os nomes no export para as outras raridades devem ser `Uncommon`, `Mythic` e `Legendary` (só vimos `Common` e `Rare`). Isso se confirma quando aparecerem vendas.
