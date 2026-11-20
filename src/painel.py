@@ -13,6 +13,7 @@ import statistics
 import sys
 import threading
 import time
+from bisect import bisect_right
 from collections import defaultdict
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -229,6 +230,7 @@ def api_resumo(con, moeda: str) -> dict:
 PASSOS_GRAFICO = (5 * 60_000, 10 * 60_000, 15 * 60_000, 30 * 60_000, HORA, 3 * HORA, 6 * HORA, 12 * HORA, DIA, 7 * DIA)
 MAX_BALDES = 120
 ZOOM_MINIMO = HORA  # o zoom não fica menor que 1 h (com baldes de 5 min, são 12 pontos)
+DESLOC_BRT = int(importer.BRT.utcoffset(None).total_seconds() * 1000)  # -3 h: baldes em horas redondas de Brasília
 
 
 def _vendas_janela(con, nome: str, moeda: str, dur, t: int):
@@ -244,14 +246,105 @@ def _vendas_janela(con, nome: str, moeda: str, dur, t: int):
     return linhas, (lambda p: lo <= p <= hi)
 
 
-def _baldes(bons, ini: int, fim: int):
+MAX_FAIXAS = 5  # faixas de preço no gráfico de volume (cores de uma rampa só, da mais barata à mais cara)
+
+
+def _fmt_faixa(v: float) -> str:
+    if v >= 1_000_000:
+        return f"{v / 1_000_000:.4g} mi".replace(".", ",")
+    if v >= 10_000:
+        return f"{v / 1000:.4g} mil".replace(".", ",")
+    return f"{v:.4g}".replace(".", ",")
+
+
+def _rot_intervalo(a: float, b: float) -> str:
+    """'13–14 mi' em vez de '13 mi–14 mi'."""
+    ra, rb = _fmt_faixa(a), _fmt_faixa(b)
+    for suf in (" mi", " mil"):
+        if ra.endswith(suf) and rb.endswith(suf):
+            return f"{ra[:-len(suf)]}–{rb}"
+    return f"{ra}–{rb}"
+
+
+def _faixas_preco(bons) -> list[dict]:
+    """Faixas de preço para empilhar o volume: quem vende a 3 e quem vende a 4.
+
+    Até MAX_FAIXAS preços distintos, cada preço é uma faixa (o caso das gemas). Acima disso,
+    cortes nos quintis das unidades, arredondados para números redondos. Cada faixa vale
+    de <= preço < ate (None = sem limite)."""
+    peso: dict[float, int] = defaultdict(int)
+    for _, r in bons:
+        p = round(r["unit_price"], 2)
+        peso[int(p) if p == int(p) else p] += r["qty"]
+    if not peso:
+        return []
+    precos = sorted(peso)
+    inteiros = all(p == int(p) for p in precos)
+    if len(precos) <= MAX_FAIXAS:
+        return [{"de": p, "ate": p, "rot": _fmt_faixa(p)} for p in precos]
+    total = sum(peso.values())
+    def quantil(q):
+        acum = 0
+        for p in precos:
+            acum += peso[p]
+            if acum >= q * total:
+                return p
+        return precos[-1]
+    # Preço inteiro concentrado em poucos valores (gemas: quase tudo a 2, 3 ou 4): um preço por faixa
+    # no miolo e as pontas raras juntas, para a troca de 3 para 4 não sumir dentro de "≥ 3".
+    lo, hi = quantil(0.02), quantil(0.98)
+    if inteiros and hi - lo + 1 <= MAX_FAIXAS - 2:
+        faixas = [{"de": None, "ate": lo, "rot": f"≤ {_fmt_faixa(lo - 1)}"}] if precos[0] < lo else []
+        faixas += [{"de": v, "ate": v, "rot": _fmt_faixa(v)} for v in range(int(lo), int(hi) + 1)]
+        if precos[-1] > hi:
+            faixas.append({"de": hi + 1, "ate": None, "rot": f"≥ {_fmt_faixa(hi + 1)}"})
+        return faixas
+    p10, p90 = quantil(0.1), quantil(0.9)
+    bruto = max((p90 - p10) / 10, 1 if inteiros else 1e-9)
+    ordem = 10 ** int(f"{bruto:e}".split("e")[1])
+    passo = next(m * ordem for m in (1, 2, 5, 10) if m * ordem >= bruto)
+    cortes = sorted({round(quantil(q) / passo) * passo for q in (0.2, 0.4, 0.6, 0.8)})
+    cortes = [c for c in cortes if precos[0] < c <= precos[-1]]
+    if not cortes:
+        return [{"de": None, "ate": None, "rot": _rot_intervalo(precos[0], precos[-1])}]
+    faixas, ant = [], None
+    for c in cortes + [None]:
+        # Preço de unidade em unidade (gemas): "≤ 2" e "3–4". Em coins o corte é redondo e "< 13,5 mi" não
+        # deixa dúvida de onde fica o 13,5 mi (na faixa de cima).
+        un = inteiros and passo == 1
+        if ant is None:
+            rot = f"≤ {_fmt_faixa(c - 1)}" if un else f"< {_fmt_faixa(c)}"
+        elif c is None:
+            rot = f"≥ {_fmt_faixa(ant)}"
+        elif un and c - ant == 1:
+            rot = _fmt_faixa(ant)
+        else:
+            rot = _rot_intervalo(ant, c - 1 if un else c)
+        faixas.append({"de": ant, "ate": c, "rot": rot})
+        ant = c
+    return faixas
+
+
+def _faixa_de(faixas: list[dict], preco: float) -> int:
+    p = round(preco, 2)
+    for i, f in enumerate(faixas):
+        if f["de"] is not None and f["de"] == f["ate"]:  # faixa de um preço só
+            if p == f["de"]:
+                return i
+        elif (f["de"] is None or p >= f["de"]) and (f["ate"] is None or p < f["ate"]):
+            return i
+    return min(range(len(faixas)), key=lambda i: abs((faixas[i]["de"] or 0) - p)) if faixas else 0
+
+
+def _baldes(bons, ini: int, fim: int, faixas: list[dict] | None = None):
     """Agrupa as vendas de [ini, fim] em até MAX_BALDES baldes.
 
     Os baldes começam em horas redondas do horário de Brasília (14:00–14:15, não 14:07–14:22),
-    para o tooltip e o eixo baterem com o relógio."""
+    para o tooltip e o eixo baterem com o relógio. Com `faixas`, cada balde traz também as
+    unidades vendidas em cada faixa de preço (`por_faixa`)."""
     span = max(fim - ini, 1)
     passo = next((p for p in PASSOS_GRAFICO if span / p <= MAX_BALDES), PASSOS_GRAFICO[-1])
-    desloc = int(importer.BRT.utcoffset(None).total_seconds() * 1000)  # -3 h
+    desloc = DESLOC_BRT
     baldes: dict[int, list] = defaultdict(list)
     for ms, r in bons:
         if ini <= ms <= fim:
@@ -261,9 +354,70 @@ def _baldes(bons, ini: int, fim: int):
         rs = baldes[k]
         ps = [r["unit_price"] for r in rs]
         t0 = k * passo - desloc
-        serie.append({"t": t0, "fim": t0 + passo, "mediana": mediana(ps),
-                      "min": min(ps), "max": max(ps), "vendas": len(rs), "unidades": sum(r["qty"] for r in rs)})
+        b = {"t": t0, "fim": t0 + passo, "mediana": mediana(ps),
+             "min": min(ps), "max": max(ps), "vendas": len(rs), "unidades": sum(r["qty"] for r in rs)}
+        if faixas:
+            pf = [0] * len(faixas)
+            for r in rs:
+                pf[_faixa_de(faixas, r["unit_price"])] += r["qty"]
+            b["por_faixa"] = pf
+        serie.append(b)
     return passo, serie
+
+
+def _cobertura(con) -> dict:
+    """Até quando as vendas já chegaram (a venda mais nova do banco; o export é de hora em hora) e os
+    buracos: export que veio cheio (5000 linhas) sem alcançar o anterior deixa vendas de fora."""
+    r = con.execute("SELECT ts, MAX(ts_ms) AS ts_ms FROM trades WHERE ts = (SELECT MAX(ts) FROM trades)").fetchone()
+    buracos, ant = [], None
+    for i in con.execute("SELECT oldest_ts, newest_ts, gap_before FROM imports ORDER BY id"):
+        if i["gap_before"] and ant and ant["newest_ts"] and i["oldest_ts"]:
+            buracos.append((ms_da_linha(ant["newest_ts"], None), ms_da_linha(i["oldest_ts"], None) + 60_000))
+        ant = i
+    return {"ate": ms_da_linha(r["ts"], r["ts_ms"]) if r and r["ts"] else None, "buracos": buracos}
+
+
+def _estoque(con, nome: str, ini: int, fim: int, passo: int, cobertura: dict):
+    """Unidades anunciadas na loja (fotos da vitrine) por balde e as que entraram nele.
+
+    `estoque` é a última foto do balde. As entradas não vêm do jogo: saem da conta
+    estoque agora − estoque antes + vendidas no meio (nas duas moedas, suspeitas incluídas,
+    porque também tiram da loja). Só dá para fazer a conta até a última venda importada e fora
+    dos buracos do export; nesses baldes `entradas` fica None. Anúncio cancelado ou vencido
+    entra como entrada negativa."""
+    vit_id = con.execute("SELECT id FROM itens WHERE nome = ?", (nome,)).fetchone()
+    if not vit_id:
+        return []
+    fotos = con.execute("SELECT snap_ms, unidades, anuncios FROM vitrine WHERE item_id = ? AND snap_ms BETWEEN ? AND ? "
+                        "AND unidades IS NOT NULL ORDER BY snap_ms", (vit_id[0], ini - 2 * passo, fim)).fetchall()
+    if not fotos:
+        return []
+    vendas = [(ms_da_linha(r["ts"], r["ts_ms"]), r["qty"]) for r in con.execute(
+        "SELECT ts, ts_ms, qty FROM trades WHERE kind='item' AND base_name=? AND ts >= ?",
+        (nome, ts_de_ms(fotos[0]["snap_ms"] - 60_000)))]
+    vendas.sort()
+    t_vendas = [ms for ms, _ in vendas]
+    acum = [0]
+    for _, q in vendas:
+        acum.append(acum[-1] + q)
+    ultima: dict[int, sqlite3.Row] = {}
+    for f in fotos:
+        ultima[(f["snap_ms"] + DESLOC_BRT) // passo] = f  # fica a última foto de cada balde
+    out, ant = [], None
+    for k in sorted(ultima):
+        f = ultima[k]
+        t0 = k * passo - DESLOC_BRT
+        entradas = vendidas = None
+        a = ant[1]["snap_ms"] if ant else None
+        if (ant is not None and k - ant[0] == 1 and cobertura["ate"] is not None and f["snap_ms"] <= cobertura["ate"]
+                and not any(b0 < f["snap_ms"] and a < b1 for b0, b1 in cobertura["buracos"])):
+            vendidas = acum[bisect_right(t_vendas, f["snap_ms"])] - acum[bisect_right(t_vendas, a)]
+            entradas = f["unidades"] - ant[1]["unidades"] + vendidas
+        if t0 + passo > ini:
+            out.append({"t": t0, "fim": t0 + passo, "estoque": f["unidades"], "anuncios": f["anuncios"],
+                        "entradas": entradas, "vendidas": vendidas})
+        ant = (k, f)
+    return out
 
 
 def _anuncios(con, nome: str, moeda: str, de, ate=None, passo=None):
@@ -287,7 +441,7 @@ def _anuncios(con, nome: str, moeda: str, de, ate=None, passo=None):
     # Muitas fotos (a vitrine é lida a cada poucos minutos): uma por meio balde, a de valor mediano.
     # É sempre uma foto real (o tooltip mostra o horário dela) e não puxa a linha para os extremos.
     meio = max(passo // 2, 1)
-    desloc = int(importer.BRT.utcoffset(None).total_seconds() * 1000)
+    desloc = DESLOC_BRT
     grupos: dict[int, list] = defaultdict(list)
     for f in fotos:
         grupos[(f["t"] + desloc) // meio].append(f)
@@ -313,8 +467,10 @@ def api_item(con, nome: str, moeda: str, janela: str) -> dict:
     if linhas and linhas[0][0] > ini:
         ini = max(ini, linhas[0][0] - (t - linhas[0][0]) * 0.04)
     ini = int(ini)
-    passo, serie = _baldes(bons, ini, max(t, ini + HORA))
+    faixas = _faixas_preco(bons)
+    passo, serie = _baldes(bons, ini, max(t, ini + HORA), faixas)
     anuncios = _anuncios(con, nome, moeda, (t - dur) if dur else None, passo=passo)
+    cobertura = _cobertura(con)
     vit = vitrine_atual(con).get(nome, {})
 
     recentes = [{"t": ms, "qtd": r["qty"], "unit": r["unit_price"], "total": r["total"],
@@ -331,7 +487,8 @@ def api_item(con, nome: str, moeda: str, janela: str) -> dict:
             "p10": percentil(pb, 0.1), "p90": percentil(pb, 0.9),
             "primeira": bons[0][0] if bons else None, "ultima": bons[-1][0] if bons else None,
         },
-        "serie": serie, "anuncios": anuncios,
+        "serie": serie, "anuncios": anuncios, "faixas": faixas, "vendas_ate": cobertura["ate"],
+        "estoque": _estoque(con, nome, ini, max(t, ini + HORA), passo, cobertura),
         "vitrine": {"min": (vit.get("min") or {}).get(moeda), "anuncios": vit.get("anuncios"),
                     "unidades": vit.get("unidades"), "media7": (vit.get("media7") or {}).get(moeda),
                     "snap_ms": vit.get("snap_ms")},
@@ -348,12 +505,16 @@ def api_item_serie(con, nome: str, moeda: str, janela: str, de: int, ate: int) -
     ate = min(ate or t, t)
     de = min(de, ate - ZOOM_MINIMO)
     linhas, normal = _vendas_janela(con, nome, moeda, JANELAS.get(janela, 7 * DIA), t)
-    bons = [(ms, r) for ms, r in linhas if normal(r["unit_price"]) and de <= ms <= ate]
-    passo, serie = _baldes(bons, de, ate)
+    todas = [(ms, r) for ms, r in linhas if normal(r["unit_price"])]
+    faixas = _faixas_preco(todas)  # as mesmas faixas (e cores) do gráfico de fora
+    bons = [(ms, r) for ms, r in todas if de <= ms <= ate]
+    passo, serie = _baldes(bons, de, ate, faixas)
     pb = sorted(r["unit_price"] for _, r in bons)
+    cobertura = _cobertura(con)
     return {
         "nome": nome, "moeda": moeda, "de": de, "ate": ate, "passo": passo,
         "serie": serie, "anuncios": _anuncios(con, nome, moeda, de, ate, passo),
+        "faixas": faixas, "vendas_ate": cobertura["ate"], "estoque": _estoque(con, nome, de, ate, passo, cobertura),
         "resumo": {"vendas": len(bons), "unidades": sum(r["qty"] for _, r in bons), "mediana": mediana(pb),
                    "min": pb[0] if pb else None, "max": pb[-1] if pb else None},
     }
