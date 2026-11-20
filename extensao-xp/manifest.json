@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "PokeIdle Tracker – Ritmo de XP",
+  "version": "1.0.0",
+  "description": "Mede o ritmo de XP do treinador e dos Pokémon na aba do jogo e estima quanto tempo falta até o nível escolhido, com os bônus de XP ligados ou desligados. Só escuta o socket que o jogo já tem aberto; não manda nada.",
+  "content_scripts": [
+    {
+      "matches": ["https://pokeidle.io/*"],
+      "js": ["calculo.js", "ritmo.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}

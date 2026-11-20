@@ -77,12 +77,17 @@ pokeidletracker/
 │     └─ app.css            visual do jogo (tokens de cor e fontes em :root)
 ├─ testes/
 │  ├─ teste_robo_sessao.py  robô contra um jogo falso (sessão, queda, vitrine, poda)
-│  └─ teste_robo_extensao.py robô contra uma aba falsa da extensão (Origin, 4002, queda, troca automática)
+│  ├─ teste_robo_extensao.py robô contra uma aba falsa da extensão (Origin, 4002, queda, troca automática)
+│  └─ teste_extensao_xp.js  contas da extensao-xp/ e, com --tela, a janelinha numa aba falsa do jogo
 ├─ extensao/                extensão do Idle Deck (MV3): liga a aba de uma conta ao robô
 │  ├─ manifest.json
 │  ├─ pagina.js             roda na página do jogo (world MAIN): pega o socket do jogo, filtra pedidos e respostas
 │  ├─ aba.js                mundo isolado: leva as mensagens entre a página e o fundo; o pontinho de status
 │  └─ fundo.js              service worker: a conexão ws://127.0.0.1:8772 com o robô
+├─ extensao-xp/             extensão "Ritmo de XP" (MV3, Idleterino/Idle Deck): tempo até o nível X, na aba do jogo
+│  ├─ manifest.json
+│  ├─ calculo.js            curva de XP do jogo, ritmo medido sem os bônus, projeção com bônus que acabam
+│  └─ ritmo.js              world MAIN: escuta o socket do jogo (só ouve), guarda as amostras, a janelinha
 ├─ legado/                  primeira tentativa de coleta: userscript no navegador (não roda no Idle Deck)
 │  ├─ userscript/pokeidle-coletor.user.js
 │  └─ iniciar-coletor.bat   liga o servidor do userscript (src/coleta/coletor.py, porta 8765)
@@ -277,6 +282,14 @@ página do jogo (pagina.js, world MAIN) ⇄ window.postMessage ⇄ aba.js (isola
 - **`aba.js`** liga a porta com o fundo quando o jogo está aberto e desliga quando o socket do jogo fecha. Manda um `vivo` a cada 20 s, para o service worker não dormir, e reconecta em 2 s se ele for encerrado. Desenha um pontinho no canto de baixo à esquerda: verde = ligado ao robô, laranja = esperando (o `title` diz o motivo).
 - **`fundo.js`** abre `ws://127.0.0.1:8772`, manda `{"t":"ext.oi","nick","versao"}` e, com o `{"t":"ext.ok"}`, avisa a aba. Robô fora do ar: tenta de novo a cada 10 s; `4002` (outra aba já ligada): a cada 60 s.
 - **No robô (`Extensao`):** só aceita `Origin: chrome-extension://…` (403 para o resto; um site não forja esse Origin). Uma aba por vez (`4002` para as outras); `4003` sem `ext.oi`; `4004` para uma extensão mais velha que `VERSAO_EXTENSAO_MIN`. A porta muda com `POKEIDLE_PORTA_EXTENSAO` (os testes usam isso), mas a extensão usa 8772 fixo.
+
+### 6.1.2 Extensão "Ritmo de XP" (`extensao-xp/`, sem robô e sem painel)
+Uma extensão à parte, independente do robô: roda na aba de cada conta (o Idleterino carrega a extensão em todas as contas; no Idle Deck, por conta) e mostra um botão **⏱ XP** no canto de baixo à direita. A janelinha estima quanto tempo falta até um nível escolhido, do treinador, do Pokémon ativo ou de um Pokémon que esteja ganhando XP (XP Share, casa).
+- **Só ouve.** `ritmo.js` troca o `WebSocket` por uma subclasse que põe um ouvinte de `message` no socket do jogo; não manda nada (o teste confere), não abre conexão, não lê o token e não fala com o robô. Usa o `welcome` e os `estado` parciais, mesclados como o cliente (`shared/estado-delta.mjs`: `cheio`, `pokemons`, `pkMud`, `pkFora`).
+- **Ritmo:** a cada mudança de XP (o `xp` do jogo é o acumulado desde o Nv 1), guarda `{t, xp, mult}` com o bônus que valia (`estado.bonusXp`, sem as partes vencidas, como o `bonusXpAgora` do jogo). O ritmo da janela (10 min a 6 h) é o XP ganho ÷ o tempo desde a 1ª amostra da janela; o "sem bônus" divide cada ganho pelo bônus do momento. As amostras das últimas 6 h ficam no `localStorage` por nick (`pokeidle-ritmo-xp:<nick>:amostras`), então recarregar a página não zera. Dá para digitar o XP/h (com os bônus de agora, como a Sessão do jogo mostra).
+- **Bônus:** os do jogo (`FONTES`, a mesma lista e os mesmos nomes da tela "Bônus de XP"): VIP ×1,5, XP Boost ×1,5 (só treinador), XP Boost Pokémon ×1,5 (só Pokémon), Boost da Guild ×1,1, Twitch e Kick (+`pct`, 15%), Atrasados ×10 (até o treinador chegar no alvo, nos dois XPs), Sacrifício ×1,2, e os que só aparecem quando valem (guild no ranking, evento, raid, outros). O padrão de cada um é estar ligado se vale na conta; o jogador liga e desliga (`opcoes.liga`, por nick) e **padrão da conta** volta. Com **Bônus da conta acabam no prazo**, um bônus que vale agora deixa de contar no `ate` dele. Os bônus multiplicam.
+- **Projeção** (`calculo.projecao`): o XP/h cru × os bônus ligados, em pedaços de tempo entre os fins dos bônus; o dos Atrasados acaba por XP (treinador) ou no instante em que o treinador chega no alvo (Pokémon). A curva é a do jogo (`xpTotalDoNivel`, a mesma para treinador e Pokémon). Mostra o tempo, a data, o nível em 24 h e a tabela nível a nível (até 40 linhas). Supõe o mesmo ritmo cru até o fim (mesma hunt); avisa quando o alvo do Pokémon passa do Nv do treinador + 5.
+- **Instalar:** no Idleterino, instalar a pasta `extensao-xp/` (ele copia a pasta: mudou o código, instale de novo).
 
 ### 6.2 Tracker público (`https://pokeidle.io/tracker/api/<rota>`, GET, JSON, sem login)
 É o site do botão "Tracker" do PvP. O jogo avisa quando alguém pede rápido demais, então
@@ -623,6 +636,7 @@ robô atualiza o token sozinho quando o jogo manda `sessao.renovada`.
 
 - **`python testes/teste_robo_sessao.py`:** o robô contra um jogo falso local, numa pasta temporária. Não toca no jogo nem no banco real.
 - **`python testes/teste_robo_extensao.py`:** o robô no modo extensão contra uma aba falsa (porta 8796): Origin recusado, `4002` para a segunda aba, queda e volta, e a troca automática da conta para a extensão.
+- **`node testes/teste_extensao_xp.js [--tela]`:** as contas da `extensao-xp/` (curva, ritmo, projeção com bônus que acabam e Atrasados); com `--tela`, a janelinha num Chromium com o socket do jogo falso (ritmo medido, ligar e desligar bônus, alvo, tabela, Pokémon ativo, e que nada é enviado).
 - **A extensão de verdade** foi testada num Chromium com a pasta carregada, a página do jogo e o socket simulados (Playwright `routeWebSocket`) e o robô real numa pasta temporária. No PC, não há como testá-la sem uma conta no Idle Deck: quem carrega é o dono.
 - **Painel de teste:** `.claude/launch.json` sobe uma cópia na porta 8771 (`python src/painel.py --porta 8771`), com o mesmo banco. Dá para testar rotas e página sem derrubar o painel em uso.
 - **Experimentos que gravam:** copie `data/market.db` para uma pasta temporária e aponte `importer.connect` para a cópia.
