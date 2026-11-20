@@ -202,7 +202,7 @@ function desenharDetalhe(d) {
       <div class="grafico" id="g-vol"></div>
       <div class="titulo-mini">Na loja: unidades anunciadas</div>
       <div class="grafico" id="g-est"></div>
-      <div class="titulo-mini">Entrando na loja (estimativa: estoque novo − anterior + vendidas; vermelho = saiu sem venda)</div>
+      <div class="titulo-mini">Saldo da loja (entrou − saiu, vendidas incluídas; verde = estoque subiu, vermelho = desceu)</div>
       <div class="grafico" id="g-ent"></div>
       <div class="aviso" id="g-aviso"></div>
     </div>
@@ -307,7 +307,7 @@ function desenharGraficos(d) {
   const gp = $('#g-preco'), gv = $('#g-vol'), ge = $('#g-est'), gn = $('#g-ent');
   if (!gp) return;
   const W = Math.max(320, gp.clientWidth);
-  const H = 270, HV = 110, HE = 80, HN = 64;
+  const H = 270, HV = 110, HE = 80, HN = 84;
   const m = { l: 62, r: 84, t: 10, b: 24 };
   const { x0, x1, serie, anun, passo, zoom, estoque } = vistaGrafico(d);
   const faixas = d.faixas || [];
@@ -479,24 +479,28 @@ function desenharGraficos(d) {
     se += `<circle id="mira-e" r="5" fill="none" stroke="var(--tinta)" stroke-width="2" visibility="hidden"/>`;
     graf.YE = YE;
 
-    // Entradas: barra para cima = anúncios novos; para baixo = saiu sem venda (cancelado ou vencido).
-    const ents = est.filter((e) => e.entradas != null);
-    const nLo = Math.min(0, ...ents.map((e) => e.entradas)), nHi = Math.max(1, ...ents.map((e) => e.entradas));
-    const YN = (v) => 4 + (1 - (v - nLo) / (nHi - nLo)) * (HN - 8);
+    // Saldo da loja por período: entraram − saíram (vendidas + canceladas/vencidas) = quanto o estoque mudou.
+    // O zero fica no meio, com a mesma escala para cima e para baixo: barra verde = entrou mais do que saiu,
+    // vermelha = saiu mais do que entrou.
+    // O saldo só precisa das fotos da vitrine: aparece mesmo depois da última venda importada.
+    const ents = est.filter((e) => e.saldo != null);
+    const nMax = Math.max(1, ...ents.map((e) => Math.abs(e.saldo)));
+    const YN = (v) => HN / 2 - (v / nMax) * (HN / 2 - 4);
     sn += gradeT(4, HN - 4);
-    sn += `<line x1="${m.l}" x2="${W - m.r}" y1="${YN(0)}" y2="${YN(0)}" stroke="var(--grade)"/>`;
-    sn += `<text x="${m.l - 8}" y="14" text-anchor="end">${nf(0).format(nHi)}</text>`;
-    if (nLo < 0) sn += `<text x="${m.l - 8}" y="${HN - 2}" text-anchor="end">${nf(0).format(nLo)}</text>`;
-    else sn += `<text x="${m.l - 8}" y="${YN(0)}" text-anchor="end">0</text>`;
+    sn += `<line x1="${m.l}" x2="${W - m.r}" y1="${YN(0)}" y2="${YN(0)}" stroke="var(--tinta-3)"/>`;
+    sn += `<text x="${m.l - 8}" y="12" text-anchor="end">+${nf(0).format(nMax)}</text>`;
+    sn += `<text x="${m.l - 8}" y="${YN(0) + 4}" text-anchor="end">0</text>`;
+    sn += `<text x="${m.l - 8}" y="${HN - 2}" text-anchor="end">−${nf(0).format(nMax)}</text>`;
     est.forEach((e) => {
       const xa = X(e.t) + 1, xb = X(Math.min(e.fim, x1)) - 1, w = Math.max(2, xb - xa);
-      if (e.entradas == null) {
-        // Sem conta possível (vendas ainda não importadas, foto ou export faltando): só um traço apagado.
+      if (e.saldo == null) {
+        // Sem a foto do balde anterior: só um traço apagado.
         sn += `<rect x="${xa}" y="${YN(0) - 1}" width="${w}" height="2" fill="var(--grade)"/>`;
         return;
       }
-      const ya = YN(Math.max(0, e.entradas)), yb = YN(Math.min(0, e.entradas));
-      sn += `<rect data-t="${e.t}" x="${xa}" y="${ya}" width="${w}" height="${Math.max(1, yb - ya)}" fill="${e.entradas >= 0 ? 'var(--tinta-2)' : 'var(--desce)'}"/>`;
+      const v = e.saldo;
+      const ya = YN(Math.max(0, v)), yb = YN(Math.min(0, v));
+      sn += `<rect data-t="${e.t}" x="${xa}" y="${ya}" width="${w}" height="${Math.max(1, yb - ya)}" fill="${v >= 0 ? 'var(--sobe)' : 'var(--desce)'}"/>`;
     });
   } else {
     se += `<text x="${m.l + pw / 2}" y="${HE / 2}" text-anchor="middle">sem fotos da vitrine neste trecho</text>`;
@@ -504,11 +508,11 @@ function desenharGraficos(d) {
   se += miraV(HE) + `<rect class="alvo" x="${m.l}" y="0" width="${pw}" height="${HE}" fill="transparent"/>`;
   sn += miraV(HN) + `<rect class="alvo" x="${m.l}" y="0" width="${pw}" height="${HN}" fill="transparent"/>`;
   ge.innerHTML = `<svg viewBox="0 0 ${W} ${HE - 14}" height="${HE - 14}" role="img" aria-label="Unidades anunciadas na loja ao longo do tempo">${se}</svg>`;
-  gn.innerHTML = est.length ? `<svg viewBox="0 0 ${W} ${HN}" height="${HN}" role="img" aria-label="Unidades que entraram na loja por período (estimativa)">${sn}</svg>` : '';
+  gn.innerHTML = est.length ? `<svg viewBox="0 0 ${W} ${HN}" height="${HN}" role="img" aria-label="Saldo de unidades da loja por período: entrou menos saiu (estimativa)">${sn}</svg>` : '';
 
   const buracos = trechos.length - 1;
   $('#g-aviso').textContent = `Cada ponto = ${rotPasso(passo)}.` + (buracos > 0 ? ` A linha se interrompe onde ficou muito tempo sem venda (${buracos} intervalo(s)).` : '')
-    + (d.vendas_ate ? ` Vendas importadas até ${fDiaHora.format(d.vendas_ate)} (o export é de hora em hora); depois disso as entradas ficam sem conta.` : '')
+    + (d.vendas_ate ? ` Vendas importadas até ${fDiaHora.format(d.vendas_ate)} (o export é de hora em hora); depois disso o saldo segue pelas fotos da loja, mas entradas e saídas ficam sem conta.` : '')
     + (zoom?.carregando ? ' Carregando o trecho em detalhe…' : '');
 
   graf.v = { d, W, H, m, pw, x0, x1, serie, anun, passo, X, Y, centro, moeda, faixas, est };
@@ -670,8 +674,9 @@ function mostrarPonto(i, ev, t) {
   }
   if (e) {
     h += `<div>na loja <b>${nf(0).format(e.estoque)}</b> un. · ${nf(0).format(e.anuncios)} anúncios</div>`;
-    if (e.entradas != null) h += `<div class="sub">entraram ≈ ${nf(0).format(Math.max(0, e.entradas))} un. · venderam ${nf(0).format(e.vendidas)} (todas as moedas)${e.entradas < 0 ? ` · ${nf(0).format(-e.entradas)} saíram sem venda` : ''}</div>`;
-    else h += '<div class="sub">entradas: sem conta neste trecho</div>';
+    if (e.saldo != null) h += `<div>saldo <b style="color:var(${e.saldo >= 0 ? '--sobe' : '--desce'})">${e.saldo >= 0 ? '+' : '−'}${nf(0).format(Math.abs(e.saldo))}</b> un. na loja</div>`;
+    if (e.entradas != null) h += `<div class="sub">entraram ≈ ${nf(0).format(Math.max(0, e.entradas))} · saíram ${nf(0).format(e.vendidas + Math.max(0, -e.entradas))} (venderam ${nf(0).format(e.vendidas)}${e.entradas < 0 ? `, ${nf(0).format(-e.entradas)} sem venda` : ''}; todas as moedas)</div>`;
+    else if (e.saldo != null) h += '<div class="sub">entradas e saídas: vendas ainda não importadas</div>';
   }
   if (graf.fixo == null && s) h += '<div class="sub">clique para fixar</div>';
   const tip = $('#tooltip');

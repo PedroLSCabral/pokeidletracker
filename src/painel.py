@@ -487,7 +487,8 @@ def _estoque(con, nome: str, ini: int, fim: int, passo: int, cobertura: dict):
     estoque agora − estoque antes + vendidas no meio (nas duas moedas, suspeitas incluídas,
     porque também tiram da loja). Só dá para fazer a conta até a última venda importada e fora
     dos buracos do export; nesses baldes `entradas` fica None. Anúncio cancelado ou vencido
-    entra como entrada negativa."""
+    entra como entrada negativa. `saldo` = estoque agora − estoque do balde anterior (None sem o balde
+    anterior), que não depende das vendas."""
     vit_id = con.execute("SELECT id FROM itens WHERE nome = ?", (nome,)).fetchone()
     if not vit_id:
         return []
@@ -512,13 +513,15 @@ def _estoque(con, nome: str, ini: int, fim: int, passo: int, cobertura: dict):
         t0 = k * passo - DESLOC_BRT
         entradas = vendidas = None
         a = ant[1]["snap_ms"] if ant else None
+        # O saldo (quanto o estoque mudou) só precisa das duas fotos; não espera o export das vendas.
+        saldo = f["unidades"] - ant[1]["unidades"] if ant is not None and k - ant[0] == 1 else None
         if (ant is not None and k - ant[0] == 1 and cobertura["ate"] is not None and f["snap_ms"] <= cobertura["ate"]
                 and not any(b0 < f["snap_ms"] and a < b1 for b0, b1 in cobertura["buracos"])):
             vendidas = acum[bisect_right(t_vendas, f["snap_ms"])] - acum[bisect_right(t_vendas, a)]
             entradas = f["unidades"] - ant[1]["unidades"] + vendidas
         if t0 + passo > ini:
             out.append({"t": t0, "fim": t0 + passo, "estoque": f["unidades"], "anuncios": f["anuncios"],
-                        "entradas": entradas, "vendidas": vendidas})
+                        "entradas": entradas, "vendidas": vendidas, "saldo": saldo})
         ant = (k, f)
     return out
 
