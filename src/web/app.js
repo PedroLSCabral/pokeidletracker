@@ -484,8 +484,12 @@ function desenharGraficos(d) {
     // vermelha = saiu mais do que entrou.
     // O saldo só precisa das fotos da vitrine: aparece mesmo depois da última venda importada.
     const ents = est.filter((e) => e.saldo != null);
-    const nMax = Math.max(1, ...ents.map((e) => Math.abs(e.saldo)));
-    const YN = (v) => HN / 2 - (v / nMax) * (HN / 2 - 4);
+    // Escala pelo 90º percentil × 2: um pico solto (uma leva grande de anúncios) não achata as outras barras.
+    // Quem passa é cortado na borda, com uma ponta mais escura; o tooltip mostra o valor real.
+    const abs = ents.map((e) => Math.abs(e.saldo)).sort((a, b) => a - b);
+    const topo = abs.length ? abs[abs.length - 1] : 1;
+    const nMax = Math.max(1, Math.min(topo, 2 * (abs[Math.floor(0.9 * (abs.length - 1))] || 0)) || topo);
+    const YN = (v) => HN / 2 - (Math.max(-nMax, Math.min(nMax, v)) / nMax) * (HN / 2 - 4);
     sn += gradeT(4, HN - 4);
     sn += `<line x1="${m.l}" x2="${W - m.r}" y1="${YN(0)}" y2="${YN(0)}" stroke="var(--tinta-3)"/>`;
     sn += `<text x="${m.l - 8}" y="12" text-anchor="end">+${nf(0).format(nMax)}</text>`;
@@ -501,6 +505,7 @@ function desenharGraficos(d) {
       const v = e.saldo;
       const ya = YN(Math.max(0, v)), yb = YN(Math.min(0, v));
       sn += `<rect data-t="${e.t}" x="${xa}" y="${ya}" width="${w}" height="${Math.max(1, yb - ya)}" fill="${v >= 0 ? 'var(--sobe)' : 'var(--desce)'}"/>`;
+      if (Math.abs(v) > nMax) sn += `<rect x="${xa}" y="${v > 0 ? ya : yb - 3}" width="${w}" height="3" fill="var(--tinta)" opacity=".6"/>`;
     });
   } else {
     se += `<text x="${m.l + pw / 2}" y="${HE / 2}" text-anchor="middle">sem fotos da vitrine neste trecho</text>`;
