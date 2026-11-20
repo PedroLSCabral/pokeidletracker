@@ -266,6 +266,7 @@ const graf = {
   ocultas: new Set(), // séries escondidas pela legenda (lembradas no localStorage)
   pct: true,      // volume em % do balde (mostra a troca de 3 para 4 sem o tamanho do balde atrapalhar)
   v: null,        // a vista desenhada agora (escalas e pontos), usada pelos eventos
+  sobre: 'g-preco', // o gráfico sob o mouse: o tooltip mostra só o que é dele
 };
 
 function passoBonito(bruto) {
@@ -574,6 +575,7 @@ function ligarGrafico() {
     });
     el.addEventListener('pointermove', (ev) => {
       const x = tParaX(ev);
+      if (graf.fixo == null) graf.sobre = el.closest('.grafico')?.id || 'g-preco';
       if (arrasto) {
         if (Math.abs(x - arrasto.x) > 5) arrasto.andou = true;
         if (arrasto.andou) { sel(arrasto.x, x); esconderMira(); return; }
@@ -589,6 +591,7 @@ function ligarGrafico() {
       // Clique: fixa o ponto (ou solta, se for o mesmo).
       const i = pontoMaisPerto(xParaT(x));
       if (i == null) return;
+      graf.sobre = el.closest('.grafico')?.id || 'g-preco';
       if (graf.fixo === v.serie[i].t) { graf.fixo = null; mostrarPonto(i, ev); } else { graf.fixo = v.serie[i].t; mostrarPonto(i, null); }
     });
     el.addEventListener('pointercancel', () => { arrasto = null; sel(null); });
@@ -654,34 +657,47 @@ function mostrarPonto(i, ev, t) {
   }
   if (e) $(`#g-ent rect[data-t="${e.t}"]`)?.classList.add('ativo');
 
+  // O tooltip mostra só o gráfico sob o mouse (ou onde o ponto foi fixado): preço, volume, estoque ou saldo.
+  const qual = graf.sobre;
+  const ref = s || (qual === 'g-est' || qual === 'g-ent' ? e : null) || a;
   let h = '';
-  if (s) {
-    const ant = i > 0 ? v.serie[i - 1] : null;
-    const varr = ant && ant.mediana ? (s.mediana / ant.mediana - 1) * 100 : null;
-    h += `<div class="t">${fDiaHora.format(s.t)} – ${fHora.format(Math.min(s.fim, v.x1))}${graf.fixo === s.t ? ' <span class="fixo">fixado</span>' : ''}</div>`;
-    h += `<div><span class="sw" style="background:var(--serie-1)"></span>mediana <b>${fmtNum(s.mediana, moeda)}</b>`
-      + (varr != null && Math.abs(varr) >= 0.05 ? ` <span class="var ${varr > 0 ? 'sobe' : 'desce'}">${varr > 0 ? '▲' : '▼'} ${nf(1).format(Math.abs(varr))}%</span>` : '') + '</div>';
-    h += `<div>faixa <b>${fmtNum(s.min, moeda)} – ${fmtNum(s.max, moeda)}</b></div>`;
-    h += `<div>${nf(0).format(s.vendas)} vendas · ${nf(0).format(s.unidades)} un.</div>`;
-    if (s.precos && s.precos.length > 1) {
-      // Uma linha por preço (ou faixa) que vendeu NESTE período, do mais caro ao mais barato. As faixas
-      // saem das vendas do próprio período, não da janela: com o token entre 2 e 6, aparece "a 6", "a 5"...
-      // e não um "≥ 4" só. A cor é a da faixa da barra empilhada onde esse preço cai.
-      const tot = s.unidades || 1, nfx = v.faixas.length;
-      h += '<div class="faixas-tip">' + s.precos.map((p) => `<div><span class="sw" style="background:${nfx > 1 ? corFaixa(p.f, nfx) : 'var(--serie-1)'}"></span>a ${esc(p.rot)}: <b>${nf(0).format(p.un)}</b> un. <span class="sub">(${nf(0).format((p.un / tot) * 100)}%)</span></div>`).join('') + '</div>';
+  if (s) h += `<div class="t">${fDiaHora.format(s.t)} – ${fHora.format(Math.min(s.fim, v.x1))}${graf.fixo === s.t ? ' <span class="fixo">fixado</span>' : ''}</div>`;
+  else if (ref && ref.fim) h += `<div class="t">${fDiaHora.format(ref.t)} – ${fHora.format(Math.min(ref.fim, v.x1))}</div>`;
+  else h += `<div class="t">${fDiaHora.format(ref.t)}</div>`;
+  if (qual === 'g-vol') {
+    if (s) {
+      h += `<div>${nf(0).format(s.vendas)} vendas · <b>${nf(0).format(s.unidades)}</b> un.</div>`;
+      if (s.precos && s.precos.length > 1) {
+        // Uma linha por preço (ou faixa) que vendeu NESTE período, do mais caro ao mais barato. As faixas
+        // saem das vendas do próprio período, não da janela: com o token entre 2 e 6, aparece "a 6", "a 5"...
+        // e não um "≥ 4" só. A cor é a da faixa da barra empilhada onde esse preço cai.
+        const tot = s.unidades || 1, nfx = v.faixas.length;
+        h += '<div class="faixas-tip">' + s.precos.map((p) => `<div><span class="sw" style="background:${nfx > 1 ? corFaixa(p.f, nfx) : 'var(--serie-1)'}"></span>a ${esc(p.rot)}: <b>${nf(0).format(p.un)}</b> un. <span class="sub">(${nf(0).format((p.un / tot) * 100)}%)</span></div>`).join('') + '</div>';
+      }
+    } else h += '<div>sem vendas aqui</div>';
+  } else if (qual === 'g-est') {
+    if (e) h += `<div>na loja <b>${nf(0).format(e.estoque)}</b> un. · ${nf(0).format(e.anuncios)} anúncios</div>`;
+    else h += '<div>sem foto da loja aqui</div>';
+  } else if (qual === 'g-ent') {
+    if (e && e.saldo != null) {
+      h += `<div>saldo <b style="color:var(${e.saldo >= 0 ? '--sobe' : '--desce'})">${e.saldo >= 0 ? '+' : '−'}${nf(0).format(Math.abs(e.saldo))}</b> un. na loja</div>`;
+      if (e.entradas != null) h += `<div class="sub">entraram ≈ ${nf(0).format(Math.max(0, e.entradas))} · saíram ${nf(0).format(e.vendidas + Math.max(0, -e.entradas))} (venderam ${nf(0).format(e.vendidas)}${e.entradas < 0 ? `, ${nf(0).format(-e.entradas)} sem venda` : ''}; todas as moedas)</div>`;
+      else h += '<div class="sub">entradas e saídas: vendas ainda não importadas</div>';
+    } else h += '<div>saldo: sem a foto anterior da loja</div>';
+  } else {
+    if (s) {
+      const ant = i > 0 ? v.serie[i - 1] : null;
+      const varr = ant && ant.mediana ? (s.mediana / ant.mediana - 1) * 100 : null;
+      h += `<div><span class="sw" style="background:var(--serie-1)"></span>mediana <b>${fmtNum(s.mediana, moeda)}</b>`
+        + (varr != null && Math.abs(varr) >= 0.05 ? ` <span class="var ${varr > 0 ? 'sobe' : 'desce'}">${varr > 0 ? '▲' : '▼'} ${nf(1).format(Math.abs(varr))}%</span>` : '') + '</div>';
+      h += `<div>faixa <b>${fmtNum(s.min, moeda)} – ${fmtNum(s.max, moeda)}</b></div>`;
+    } else h += '<div>sem vendas aqui</div>';
+    if (a) {
+      const dif = s && s.mediana ? (a.min / s.mediana - 1) * 100 : null;
+      h += `<div><span class="sw" style="background:var(--serie-2)"></span>menor anúncio <b>${fmtNum(a.min, moeda)}</b>`
+        + (dif != null ? ` (${dif >= 0 ? '+' : '−'}${nf(0).format(Math.abs(dif))}% da mediana)` : '') + '</div>';
+      h += `<div class="sub">foto das ${fHora.format(a.t)}, ${nf(0).format(a.anuncios)} anúncios</div>`;
     }
-  } else h += `<div class="t">${fDiaHora.format(a.t)}</div><div>sem vendas aqui</div>`;
-  if (a) {
-    const dif = s && s.mediana ? (a.min / s.mediana - 1) * 100 : null;
-    h += `<div><span class="sw" style="background:var(--serie-2)"></span>menor anúncio <b>${fmtNum(a.min, moeda)}</b>`
-      + (dif != null ? ` (${dif >= 0 ? '+' : '−'}${nf(0).format(Math.abs(dif))}% da mediana)` : '') + '</div>';
-    h += `<div class="sub">foto das ${fHora.format(a.t)}, ${nf(0).format(a.anuncios)} anúncios</div>`;
-  }
-  if (e) {
-    h += `<div>na loja <b>${nf(0).format(e.estoque)}</b> un. · ${nf(0).format(e.anuncios)} anúncios</div>`;
-    if (e.saldo != null) h += `<div>saldo <b style="color:var(${e.saldo >= 0 ? '--sobe' : '--desce'})">${e.saldo >= 0 ? '+' : '−'}${nf(0).format(Math.abs(e.saldo))}</b> un. na loja</div>`;
-    if (e.entradas != null) h += `<div class="sub">entraram ≈ ${nf(0).format(Math.max(0, e.entradas))} · saíram ${nf(0).format(e.vendidas + Math.max(0, -e.entradas))} (venderam ${nf(0).format(e.vendidas)}${e.entradas < 0 ? `, ${nf(0).format(-e.entradas)} sem venda` : ''}; todas as moedas)</div>`;
-    else if (e.saldo != null) h += '<div class="sub">entradas e saídas: vendas ainda não importadas</div>';
   }
   if (graf.fixo == null && s) h += '<div class="sub">clique para fixar</div>';
   const tip = $('#tooltip');

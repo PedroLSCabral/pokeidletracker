@@ -503,7 +503,7 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   - **lista e detalhe:** `carregarResumo`, `desenharLista` (cada linha tem um botão `[data-vender]`), `selecionar`, `desenharDetalhe`, `ligarCalculadora`;
   - **gráfico:** `desenharGraficos`, em SVG próprio. O estado fica em `graf` (pilha de zooms, ponto fixado, séries escondidas) e zera ao trocar item, moeda ou janela:
     - arrastar faz zoom (`darZoom`): desenha na hora com os baldes que já tem e troca pelos de `/api/item/serie`; `− zoom`, duplo clique, `-` ou Esc voltam (`voltarZoom`);
-    - a mira (`mostrarPonto`) gruda no balde mais perto, com linha vertical e horizontal, anéis na mediana e no menor anúncio e etiquetas nos eixos; o tooltip traz a variação contra o balde anterior e a distância do anúncio para a mediana;
+    - a mira (`mostrarPonto`) gruda no balde mais perto, com linha vertical e horizontal, anéis na mediana e no menor anúncio e etiquetas nos eixos; o tooltip mostra só o gráfico sob o mouse (`graf.sobre`; com o ponto fixado, o do clique): no de preço, a mediana com a variação contra o balde anterior, a faixa e o menor anúncio com a distância para a mediana; no de volume, vendas, unidades e `precos`; no de estoque, a loja; no de saldo, o saldo e as entradas e saídas;
     - clique fixa o ponto, ← → andam de balde em balde (o `.grafico-box` tem foco), Esc solta;
     - a legenda é clicável e esconde séries (lembradas em `graf_ocultas` no `localStorage`); a escala de preço só olha o que está visível;
     - o eixo do tempo marca horas redondas de Brasília (`marcasTempo`), com a meia-noite mais forte; o servidor alinha os baldes do mesmo jeito (`_baldes`);
