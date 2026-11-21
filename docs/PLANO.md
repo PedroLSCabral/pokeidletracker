@@ -455,5 +455,12 @@ Pedido: medir o ritmo de XP de agora, levar em conta o XP cada vez maior dos pr�
 - **Ritmo sem bônus.** Cada ganho de XP é dividido pelo bônus daquele momento; assim um bônus que acabou no meio da janela não distorce a projeção, e ligar ou desligar um bônus só multiplica o ritmo cru.
 - **Limites:** supõe a mesma hunt e o mesmo Pokémon até o alvo (o ritmo cru não sobe com o nível); a perda de XP na morte entra no ritmo medido.
 
+## Prey: a melhor escolha da cartela (21/11)
+Pedido: o jogo ganhou o Prey (v48/v49): uma roletada dá uma cartela de 9 Pokémon, um bônus e as estrelas; o jogador escolhe um. A extensão tem que dizer qual é a melhor escolha para o Pokémon que está upando.
+- **O bônus é contra a espécie selvagem**, não para o Pokémon do jogador, e só nas hunts do Mapa. Como cada hunt do jogo tem uma espécie só, escolher a espécie é escolher as hunts onde o bônus vale. A pergunta vira: em qual das 9 (na melhor hunt liberada dela) o Pokémon faz mais XP/h com esse bônus, e isso passa a melhor hunt dele sem o Prey?
+- **A conta no painel, a leitura na aba.** A cartela e o Pokémon só existem no socket da aba (como no Ritmo de XP); o motor de XP/h com o catálogo e as hunts está no painel. A extensão só ouve o socket e manda o pedido ao painel pelo fundo dela (o mesmo caminho da extensão do coletor), sem mandar nada ao jogo.
+- **Spawn sem caminhada.** O `repartirExtras` do jogo põe os extras nos bandos que já existem ("em manadas diferentes"), então cada extra custa só a luta e o passo até ele. A onda tem os `pontos` da hunt (15 ou 16, como o `hunt-analyser.mjs`). Com isso, para quem mata de um golpe, +5 dá ~+30%; para quem luta 9 s por abate, +3 dá ~+2%. O número de bandos por onda é do servidor; se medirmos, a conta pode ganhar a caminhada dentro do bando.
+- **Dano** encurta só a luta (nada para quem mata de um golpe); **Defensivo** só pesa quando o selvagem mata de um golpe; **Capture Boost** não mexe no XP.
+
 ## Perguntas em aberto
 - Os nomes no export para as outras raridades devem ser `Uncommon`, `Mythic` e `Legendary` (só vimos `Common` e `Rare`). Isso se confirma quando aparecerem vendas.

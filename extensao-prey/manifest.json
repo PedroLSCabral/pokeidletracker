@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "PokeIdle Tracker – Prey",
+  "version": "1.0.0",
+  "description": "Lê a cartela do Prey na aba do jogo e mostra qual dos 9 Pokémon rende mais XP/h para o Pokémon que você está upando, pela conta do painel do PokeIdle Tracker no próprio PC. Só escuta o socket que o jogo já tem aberto; não manda nada ao jogo.",
+  "background": { "service_worker": "fundo.js" },
+  "host_permissions": ["http://127.0.0.1/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://pokeidle.io/*"],
+      "js": ["prey.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://pokeidle.io/*"],
+      "js": ["ponte.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

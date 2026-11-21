@@ -76,6 +76,10 @@ IVS_HP_AMOSTRA = tuple(range(1, 33))   # um abate de cada IV de HP do selvagem (
 S_POR_ABATE_MAPA = 3.41
 URL_RITMO = "https://pokeidleguide.io/data/jogo/ritmo-do-jogo.json"
 CAMINHADA_DO_MAPA, CAMINHADA_PISO_S, CAMINHADA_TAU_S = 0.83, 1.41, 2.8
+# Criaturas por onda: os `pontos` da hunt (15 ou 16), até 16, como o hunt-analyser.mjs do jogo. Só a conta do
+# Prey Spawn usa (analise/prey.py): o extra entra num bando que já existe, então custa a luta e o passo até
+# ele, sem caminhada (shared/prey.mjs, repartirExtras).
+MAX_ONDA = 16
 MORTE_S = 3 + 20.6 * 0.51           # volta ao jogo + corrida de volta
 ABATES_POR_VIDA_MAX = 999           # quem não morre de um golpe: a calculadora conta uma morte a cada 999 abates
 # "Não mata" para a conta. Precisa ser folgado: abaixo do nível 150 o XP do abate cresce com o quadrado do
@@ -513,7 +517,7 @@ class Motor:
                 hps = [max(HP_COMBATE_MIN, round((b[0] + 2 * iv) * n / 100 * HP_COMBATE_MULT)) * self.mult_hp
                        for iv in IVS_HP_AMOSTRA]
                 golpes = [g for g in esp["g"] if g[4] <= n]
-                mobs.append({"w": pts, "t": esp["t"], "st": st, "hps": hps, "golpes": golpes,
+                mobs.append({"pid": int(e["pokeId"]), "w": pts, "t": esp["t"], "st": st, "hps": hps, "golpes": golpes,
                              "d_min": max(1, min(st[2], st[4])), "hp_medio": sum(hps) / len(hps)})
                 total += pts
             if not mobs:
@@ -521,8 +525,13 @@ class Motor:
             for m in mobs:
                 m["w"] /= total
             self.hunts.append({"slug": h.get("slug"), "nome": h.get("nome") or h.get("slug"), "nivel": n,
-                               "xp": xp_do_nivel(n), "mobs": mobs, "s": float(por_hunt.get(h.get("slug")) or s_padrao)})
+                               "xp": xp_do_nivel(n), "mobs": mobs, "onda": min(MAX_ONDA, total), "s": float(por_hunt.get(h.get("slug")) or s_padrao)})
         self.hunts.sort(key=lambda h: -h["nivel"])
+        self.por_slug = {h["slug"]: h for h in self.hunts}
+        self.hunts_da_especie: dict[int, list] = {}      # espécie selvagem → as hunts onde ela nasce
+        for h in self.hunts:
+            for pid in {m["pid"] for m in h["mobs"]}:
+                self.hunts_da_especie.setdefault(pid, []).append(h)
         self.s_min = min([h["s"] for h in self.hunts] or [S_POR_ABATE_MAPA])
 
     # -- tipos
@@ -554,8 +563,8 @@ class Motor:
         return e
 
     # -- a conta
-    def xp_h(self, species_id, nivel, stats: dict, ivs: dict | None, tipos: list | None,
-             nivel_treinador: int | None = None) -> dict | None:
+    def preparar(self, species_id, nivel, stats: dict, ivs: dict | None, tipos: list | None) -> tuple | None:
+        """O que a conta usa do Pokémon (golpes, recargas, stats), feito uma vez para avaliar várias hunts."""
         esp = self.especie(species_id, tipos)
         if not esp or not nivel or not stats:
             return None
@@ -572,16 +581,27 @@ class Motor:
         desc = 1 - pot_spd * (iv_spd / 32) / 100
         golpes = [(max(PODER_MINIMO, p), t, f, round(cd * desc) / 1000) for p, t, f, cd, ll in esp["g"] if ll <= L]
         fator_nivel = 2 * L / 5 + 2
+        # Os golpes contra cada combinação de tipos do selvagem (poder × STAB × efetividade), calculados uma vez
+        # por anúncio: há poucas combinações e elas se repetem em muitas hunts.
+        por_tipos: dict = {}
+        return (golpes, tipos, fator_nivel, atk, spa, dfs, spd_, hp_pk, gap, cd_inv, por_tipos)
+
+    def xp_na_hunt(self, args: tuple, h: dict, prey: dict | None = None) -> dict | None:
+        """XP/h do Pokémon preparado (`preparar`) numa hunt só, com a luta simulada e o Prey (`_hunt`)."""
+        return self._hunt(h, *args, prey=prey)
+
+    def xp_h(self, species_id, nivel, stats: dict, ivs: dict | None, tipos: list | None,
+             nivel_treinador: int | None = None) -> dict | None:
+        args = self.preparar(species_id, nivel, stats, ivs, tipos)
+        if args is None:
+            return None
+        golpes, _tipos, fator_nivel, atk, spa = args[:5]
         teto_kph = 3600 / self.s_min        # nenhuma hunt passa disto: o mapa mais rápido, matando de um golpe
         # Teto do dano de um golpe contra qualquer selvagem: o golpe mais forte, com STAB e a maior
         # efetividade possível. Serve para descartar uma hunt sem simular.
         k_teto = fator_nivel * max([INVESTIDA_PODER] + [g[0] for g in golpes]) * max(atk, spa)
         fator_teto = STAB * EF_MAXIMA * RAND_MEDIO
 
-        # Os golpes contra cada combinação de tipos do selvagem (poder × STAB × efetividade), calculados uma vez
-        # por anúncio: há poucas combinações e elas se repetem em muitas hunts.
-        por_tipos: dict = {}
-        args = (golpes, tipos, fator_nivel, atk, spa, dfs, spd_, hp_pk, gap, cd_inv, por_tipos)
         # 1) Estimativa barata em todas as hunts liberadas, da mais alta para a mais baixa; guarda as
         #    CANDIDATAS_MAX melhores. Para quando nem o teto de uma hunt (abates/h
         #    máximos × XP do abate) alcança a pior das guardadas.
@@ -660,14 +680,25 @@ class Motor:
             caminhada = tempo_morto(h["s"], luta)
         return h["xp"] * 3600 / (caminhada + luta)
 
-    def _hunt(self, h, golpes, tipos, fator_nivel, atk, spa, dfs, spd_, hp_pk, gap, cd_inv, por_tipos):
-        """XP/h numa hunt pela mini-luta, ou None se ele não mata."""
+    def _hunt(self, h, golpes, tipos, fator_nivel, atk, spa, dfs, spd_, hp_pk, gap, cd_inv, por_tipos, prey=None):
+        """XP/h numa hunt pela mini-luta, ou None se ele não mata.
+
+        `prey` (opcional): espécie selvagem → {"dano": ×, "defesa": ×, "extras": n}, os bônus do Prey contra
+        ela (`analise/prey.py`): o nosso dano nela, o dano dela na gente e as criaturas a mais por onda."""
         luta = dps = hit_max = 0.0
         por_mob = []
+        extras = 0.0                        # criaturas a mais por onda (Prey Spawn), na média dos mobs
         for m in h["mobs"]:
             st, mt = m["st"], m["t"]
-            # nossos golpes contra este selvagem: dano = (fator·A/D/50)·q + extra, com q = poder·STAB·ef·rolagem
+            bonus = (prey or {}).get(m["pid"]) or {}
+            # nossos golpes contra este selvagem: dano = (fator·A/D/50)·q + extra, com q = poder·STAB·ef·rolagem;
+            # o Dano do Prey multiplica o dano final (shared/prey.mjs, danoPve): escala k e o extra juntos
+            md = float(bonus.get("dano") or 1)
             qs, q_inv, extra_inv, soma = self._golpes_contra(golpes, tipos, mt, por_tipos)
+            if md != 1:
+                qs = [(q * md, fis, cd, extra * md) for q, fis, cd, extra in qs]
+                q_inv, extra_inv = q_inv * md, extra_inv * md
+                soma = [x * md for x in soma]
             k_fis, k_esp = fator_nivel * atk / max(1, st[2]) / 50, fator_nivel * spa / max(1, st[4]) / 50
             d_inv = k_fis * q_inv + extra_inv
             # Limite fechado, sem simular: em F segundos cada golpe sai no máximo 1 + F/recarga vezes e a Investida
@@ -697,8 +728,10 @@ class Motor:
             ti = mt[1] if len(mt) > 1 and self.ef(mt[0], tipos) == 0 else mt[0]
             inv = ((fn_mob * INVESTIDA_PODER * st[1] / max(1, dfs)) / 50 + 2) * STAB * self.ef(ti, tipos) * RAND_MEDIO
             media = (sum(danos) / len(danos)) * 0.92 + inv * 0.08 if danos else inv
-            dps += m["w"] * media * self.mult_dano / GAP_SELVAGEM_S
-            hit_max = max(hit_max, max([inv] + danos) / RAND_MEDIO * self.mult_dano)
+            mdef = float(((prey or {}).get(m["pid"]) or {}).get("defesa") or 1)
+            dps += m["w"] * media * self.mult_dano * mdef / GAP_SELVAGEM_S
+            hit_max = max(hit_max, max([inv] + danos) / RAND_MEDIO * self.mult_dano * mdef)
+            extras += m["w"] * float(((prey or {}).get(m["pid"]) or {}).get("extras") or 0)
         # A luta encurta a caminhada, e a caminhada mais curta deixa menos recarga para a luta. Como a
         # calculadora: a luta simulada com o tempo morto do mapa e com o piso dele e, no meio, a reta entre as
         # duas; o ponto fixo sai por bisseção.
@@ -722,6 +755,11 @@ class Motor:
                         hi = meio
                 luta = luta_com((lo + hi) / 2)
         s_abate = tempo_morto(s_mapa, luta) + luta
+        if extras > 0:
+            # Prey Spawn: a onda de N criaturas ganha `extras` dentro dos bandos que já existem; cada uma custa
+            # a luta e o passo até ela (o intervalo do golpe), sem a caminhada até o próximo bando.
+            n = h["onda"]
+            s_abate = (n * s_abate + extras * (luta + gap)) / (n + extras)
         kph = 3600 / s_abate
         # Com poção, só morre quem leva o HP inteiro de um golpe; a calculadora desconta, mesmo de quem não
         # morre, uma morte a cada 999 abates.

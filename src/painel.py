@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import caminhos  # noqa: E402
 import notificar  # noqa: E402
 from analise import pokemon as analise_pokemon  # noqa: E402
-from analise import arena, caca, evolucao, precificar, pvp, sinais, venda  # noqa: E402
+from analise import arena, caca, evolucao, precificar, prey, pvp, sinais, venda  # noqa: E402
 from coleta import coletor, importer  # noqa: E402
 
 HOST, PORT = "127.0.0.1", 8770
@@ -806,6 +806,13 @@ def api_status(con) -> dict:
     return st
 
 
+def post_prey(_con, corpo):
+    """A recomendação do Prey (extensão `extensao-prey/`): o Pokémon, o treinador, a hunt e as cartelas de hoje."""
+    if not isinstance(corpo, dict):
+        raise ValueError("corpo inválido")
+    return prey.recomendar(corpo)
+
+
 # ---------------------------------------------------------------- HTTP
 
 class Handler(BaseHTTPRequestHandler):
@@ -905,7 +912,8 @@ class Handler(BaseHTTPRequestHandler):
         rotas = {"/api/regras": post_regra,
                  "/api/regras/apagar": lambda c, b: post_regra_acao(c, b, "apagar"),
                  "/api/regras/alternar": lambda c, b: post_regra_acao(c, b, "alternar"),
-                 "/api/alertas/testar": post_testar}
+                 "/api/alertas/testar": post_testar,
+                 "/api/prey": post_prey}
         fn = rotas.get(urlparse(self.path).path)
         if not fn:
             return self._json({"erro": "rota desconhecida"}, 404)
@@ -913,6 +921,13 @@ class Handler(BaseHTTPRequestHandler):
             corpo = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 65536)) or b"{}")
         except json.JSONDecodeError:
             return self._json({"erro": "json inválido"}, 400)
+        if fn is post_prey:          # só conta, sem banco
+            try:
+                return self._json(fn(None, corpo))
+            except (ValueError, TypeError, caca.SemDados) as e:
+                return self._json({"erro": str(e)}, 400)
+            except Exception as e:
+                return self._json({"erro": repr(e)}, 500)
         try:
             con = importer.connect()
         except sqlite3.OperationalError as e:

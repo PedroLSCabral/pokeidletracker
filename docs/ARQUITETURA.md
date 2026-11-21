@@ -70,6 +70,7 @@ pokeidletracker/
 │  │  ├─ evolucao.py        análise de um Pokémon só até a evolução final (nota, XP/h nível a nível, preço)
 │  │  ├─ precificar.py      preço de venda de um Pokémon (rápido/normal/paciente) e até que nível vale evoluir/subir
 │  │  ├─ arena.py           força no PvP (⚔ do PvP, duelo 1×1 do jogo) e se vale evoluir um Pokémon para o PvP
+│  │  ├─ prey.py            Prey: qual dos 9 da cartela rende mais XP/h para o Pokémon que está upando
 │  │  └─ pvp.py             aba PvP (Tracker público do jogo)
 │  └─ web/                  a página do painel
 │     ├─ index.html         estrutura das abas e janelas
@@ -78,7 +79,9 @@ pokeidletracker/
 ├─ testes/
 │  ├─ teste_robo_sessao.py  robô contra um jogo falso (sessão, queda, vitrine, poda)
 │  ├─ teste_robo_extensao.py robô contra uma aba falsa da extensão (Origin, 4002, queda, troca automática)
-│  └─ teste_extensao_xp.js  contas da extensao-xp/ e, com --tela, a janelinha numa aba falsa do jogo
+│  ├─ teste_extensao_xp.js  contas da extensao-xp/ e, com --tela, a janelinha numa aba falsa do jogo
+│  ├─ teste_prey.py         o Prey no motor de caça e a recomendação (com os dados de data/jogo/)
+│  └─ teste_extensao_prey.js a janelinha da extensao-prey/ numa aba falsa do jogo, com um painel de teste
 ├─ extensao/                extensão do Idle Deck (MV3): liga a aba de uma conta ao robô
 │  ├─ manifest.json
 │  ├─ pagina.js             roda na página do jogo (world MAIN): pega o socket do jogo, filtra pedidos e respostas
@@ -88,6 +91,11 @@ pokeidletracker/
 │  ├─ manifest.json
 │  ├─ calculo.js            curva de XP do jogo, ritmo medido sem os bônus, projeção com bônus que acabam
 │  └─ ritmo.js              world MAIN: escuta o socket do jogo (só ouve), guarda as amostras, a janelinha
+├─ extensao-prey/           extensão "Prey" (MV3): a melhor escolha da cartela do Prey, pela conta do painel
+│  ├─ manifest.json
+│  ├─ prey.js               world MAIN: escuta o socket do jogo (só ouve), monta o pedido, a janelinha
+│  ├─ ponte.js              mundo isolado: leva o pedido da página ao fundo e a resposta de volta
+│  └─ fundo.js              service worker: POST http://127.0.0.1:8770/api/prey
 ├─ legado/                  primeira tentativa de coleta: userscript no navegador (não roda no Idle Deck)
 │  ├─ userscript/pokeidle-coletor.user.js
 │  └─ iniciar-coletor.bat   liga o servidor do userscript (src/coleta/coletor.py, porta 8765)
@@ -291,6 +299,12 @@ Uma extensão à parte, independente do robô: roda na aba de cada conta (o Idle
 - **Projeção** (`calculo.projecao`): o XP/h cru × os bônus ligados, em pedaços de tempo entre os fins dos bônus; o dos Atrasados acaba por XP (treinador) ou no instante em que o treinador chega no alvo (Pokémon). A curva é a do jogo (`xpTotalDoNivel`, a mesma para treinador e Pokémon). Mostra o tempo, a data, o nível em 24 h e a tabela nível a nível (até 40 linhas). Supõe o mesmo ritmo cru até o fim (mesma hunt); avisa quando o alvo do Pokémon passa do Nv do treinador + 5.
 - **Instalar:** no Idleterino, instalar a pasta `extensao-xp/` (ele copia a pasta: mudou o código, instale de novo).
 
+### 6.1.3 Extensão "Prey" (`extensao-prey/` → painel, `POST /api/prey`)
+O Prey do jogo (novidades v48/v49, regra em `shared/prey.mjs`) tem até 2 cartelas por dia; a roletada grátis revela 9 espécies, o bônus (Dano, Defensivo, Capture Boost ou Spawn) e as estrelas, e só depois o jogador escolhe uma. O bônus vale **contra aquela espécie selvagem**, nas hunts do Mapa, até a virada das 18:00 de Brasília. A extensão mostra um botão **🎯 Prey** (com um ponto quando há cartela esperando a escolha) e uma janelinha com as 9 ordenadas pelo XP/h do Pokémon que está upando.
+- **Só ouve o jogo.** `prey.js` escuta o socket como a `extensao-xp/` (mesma mescla do `estado`) e lê `automation.prey` (`dia`, `cartelas[i]` com `lista`, `pk`, `bonus`, `est`, `n`), `activeId`, `level`, `huntSlug` e os `pokemons` (stats, IVs, tipos). Cartela de outro `dia` (a chave do dia é a data de Brasília de agora + 6 h, `shared/dia-sazonal.mjs`) vale como vazia. Não manda nada ao jogo.
+- **A conta é do painel.** O pedido (o Pokémon escolhido no seletor, padrão o ativo; o nível do treinador; a hunt; as cartelas) vai pela `ponte.js` ao `fundo.js`, que faz o `POST` em `127.0.0.1:8770` (pelo fundo pelo mesmo motivo da `extensao/`). Pede de novo quando a cartela ou o Pokémon muda; quando só os níveis sobem, no máximo a cada 1 min. Uma resposta de outro pedido não aparece na tela.
+- **Instalar:** no Idleterino, instalar a pasta `extensao-prey/`. Precisa do painel ligado no PC (a bandeja mantém).
+
 ### 6.2 Tracker público (`https://pokeidle.io/tracker/api/<rota>`, GET, JSON, sem login)
 É o site do botão "Tracker" do PvP. O jogo avisa quando alguém pede rápido demais, então
 `pvp.tracker()` espera 1,5 s entre pedidos e guarda cada resposta em `pvp_cache`.
@@ -337,6 +351,7 @@ Todas as rotas GET aceitam `moeda=gems|coins` (o padrão é gems).
 | `POST /api/regras` | `post_regra` | Cria uma regra {tipo, item, moeda, valor} |
 | `POST /api/regras/apagar`, `/api/regras/alternar` | `post_regra_acao` | {id} |
 | `POST /api/alertas/testar` | `post_testar` | Manda uma notificação de teste |
+| `POST /api/prey` | `post_prey` → `prey.recomendar` (sem banco) | {pokemon: {speciesId, level, stats, ivs, tipos, nome}, treinador, huntSlug, cartelas: [{lista, pk, bonus, est} ou null]}. Devolve `melhor` (a melhor hunt sem Prey), `atual` (a hunt de agora, com o Prey já escolhido) e, por cartela, as 9 opções com a melhor hunt de cada uma, o XP/h com o bônus, `ganho` (sobre a melhor hunt sem esta cartela), `ganho_bonus`, `recomendado`, `vale` e `nota` |
 
 ---
 
@@ -454,7 +469,14 @@ Constantes de caminho: `SRC`, `RAIZ`, `CONFIG`, `DADOS`, `BANCO`, `LOG_ROBO`, `A
   1. uma estimativa fechada (`_estimar`, com a caminhada acertada pela luta) em todas as hunts liberadas, da mais alta para a mais baixa, com corte pelo teto de XP/h de cada hunt;
   2. a luta simulada só nas melhores estimativas, da melhor para a pior: no mínimo `CANDIDATAS` (8) e depois enquanto a estimativa da próxima ainda alcança a melhor simulada (até `CANDIDATAS_MAX`, 40). A estimativa erra para mais quando sobra dano, por isso as 8 fixas não bastavam.
 - **Medido (15/11/2026):** Abomasnow Nv 1176 e Furious Scizor Nv 1240 dão o mesmo número da calculadora (75.127.258 e 95.965.537 XP/h). Em 200 anúncios da loja, sem o atalho, a mesma hunt em 200 (p90 da diferença 0,1%); o atalho de agora acerta a mesma hunt que a busca completa em 300 de 300 Pokémon de teste.
+- **Uma hunt só e o Prey:** `Motor.preparar(...)` faz uma vez a parte do Pokémon (golpes, recargas, stats) e `Motor.xp_na_hunt(args, h, prey)` simula uma hunt (`por_slug`, `hunts_da_especie`: cada hunt tem uma espécie só). `prey` = espécie selvagem → `{dano, defesa, extras}`: o Dano multiplica o nosso dano final nela, o Defensivo o dano dela na gente (só pesa se ela mata de um golpe) e o Spawn põe `extras` criaturas a mais na onda de `onda` (os `pontos` da hunt, 15 ou 16, até `MAX_ONDA`), dentro dos bandos que já existem: cada uma custa a luta e o intervalo do golpe, sem caminhada. Para quem mata de um golpe, Spawn +5 dá ~+30% de XP/h; para quem luta muito, pouco.
 - **`xp_do_anuncio(m, id, ...)`** é o atalho da busca: lê os JSON de `pk_anuncios` e guarda o resultado por (anúncio, nível do treinador).
+
+### `analise/prey.py` (Prey: a melhor escolha da cartela)
+- **O que responde:** dos 9 da cartela, com o bônus e as estrelas que saíram, qual espécie leva o Pokémon ao maior XP/h, caçando na melhor hunt liberada onde ela nasce (`Motor.hunts_da_especie`, nível da hunt ≤ nível do treinador). A explicação está no topo do arquivo.
+- **Referência do ganho:** a melhor hunt do Pokémon sem o Prey (`Motor.xp_h`) ou, se a outra cartela já tem Pokémon escolhido, a melhor entre essa e as hunts dele com aquele bônus (só se caça uma hunt por vez; as duas cartelas nunca têm a mesma espécie).
+- **Valores** (`PREY_VALOR`, de `shared/prey.mjs`): Dano e Defensivo 10% a 50%, Capture Boost 2% a 10%, Spawn +1 a +5 por estrela. Capture Boost não muda o XP (a nota diz para escolher pela captura); sem roletada, a nota pede a grátis.
+- **Limites:** a conta do motor (sem AoE, TM, bike, casa e bônus de XP; a onda e o pool da lista são do servidor). O número de bandos por onda não aparece no cliente: o Spawn supõe que o extra não pede caminhada.
 
 ### `analise/evolucao.py` (análise de um Pokémon até a evolução final)
 - **Para que serve:** a busca avalia o Pokémon como está; aqui um Pokémon só (capturado, ou um anúncio pelo botão **Evoluir** da busca) é simulado até cada evolução final. A explicação completa está no topo do arquivo.
@@ -637,6 +659,8 @@ robô atualiza o token sozinho quando o jogo manda `sessao.renovada`.
 - **`python testes/teste_robo_sessao.py`:** o robô contra um jogo falso local, numa pasta temporária. Não toca no jogo nem no banco real.
 - **`python testes/teste_robo_extensao.py`:** o robô no modo extensão contra uma aba falsa (porta 8796): Origin recusado, `4002` para a segunda aba, queda e volta, e a troca automática da conta para a extensão.
 - **`node testes/teste_extensao_xp.js [--tela]`:** as contas da `extensao-xp/` (curva, ritmo, projeção com bônus que acabam e Atrasados); com `--tela`, a janelinha num Chromium com o socket do jogo falso (ritmo medido, ligar e desligar bônus, alvo, tabela, Pokémon ativo, e que nada é enviado).
+- **`python testes/teste_prey.py`:** o Prey no motor (cada bônus, quem mata de um golpe, espécie de fora) e a recomendação (ordem, referência com a outra cartela, captura, bloqueada pelo nível). Usa `data/jogo/`; sem os dados, pula.
+- **`node testes/teste_extensao_prey.js`:** sobe um painel de teste numa porta qualquer e abre a `extensao-prey/` numa aba falsa do jogo (Playwright), com uma ponte falsa no lugar da `ponte.js`/`fundo.js`: recomendação, escolha já feita, troca de Pokémon, cartela de ontem e que nada é enviado ao jogo.
 - **A extensão de verdade** foi testada num Chromium com a pasta carregada, a página do jogo e o socket simulados (Playwright `routeWebSocket`) e o robô real numa pasta temporária. No PC, não há como testá-la sem uma conta no Idle Deck: quem carrega é o dono.
 - **Painel de teste:** `.claude/launch.json` sobe uma cópia na porta 8771 (`python src/painel.py --porta 8771`), com o mesmo banco. Dá para testar rotas e página sem derrubar o painel em uso.
 - **Experimentos que gravam:** copie `data/market.db` para uma pasta temporária e aponte `importer.connect` para a cópia.
